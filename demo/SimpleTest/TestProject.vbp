@@ -1,6 +1,6 @@
 Type=Exe
-Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#C:\WINDOWS\SysWOW64\stdole2.tlb#OLE Automation
-Reference=*\G{C2A07E01-4F8B-4A2D-9C3E-1B5D8F6E7A90}#1.0#0#C:\laragon\www\GitProject\czWebview\typelib\czWebview.tlb#czWebview - VB6-safe WebView2 interfaces
+Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#..\..\..\..\..\..\..\..\Windows\SysWOW64\stdole2.tlb#OLE Automation
+Reference=*\G{C2A07E01-4F8B-4A2D-9C3E-1B5D8F6E7A90}#1.0#0#..\..\typelib\czWebview.tlb#czWebview - VB6-safe WebView2 interfaces
 UserControl=..\..\src\czWebview.ctl
 Class=czWebviewCallback; ..\..\src\czWebviewCallback.cls
 Form=frmTest.frm
@@ -17,6 +17,7 @@ MinorVer=0
 RevisionVer=0
 AutoIncrementVer=0
 ServerSupportFiles=0
+VersionCompanyName="CyberzillaDev"
 CompilationType=0
 OptimizationType=0
 FavorPentiumPro(tm)=0
