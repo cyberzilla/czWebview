@@ -135,7 +135,7 @@ chrome.webview.addEventListener('message', function(e) {
 ## 📁 Project Structure
 
 ```
-czWebview/             
+czWebview/
 ├── src/
 │   ├── czWebview.ctl               # ★ Main UserControl — public API
 │   └── czWebviewCallback.cls       # Internal callback handler (44 interfaces)
@@ -145,12 +145,14 @@ czWebview/
 │   └── compile_tlb.bat             # Auto-compile script (uses MIDL)
 ├── External/
 │   └── WebView2Loader.dll          # Microsoft x86 loader
-├── test/
-│   ├── TestProject.vbp             # Test browser (Standard EXE)
-│   ├── frmTest.frm                 # Test form with browser UI
-│   └── WebView2Loader.dll          # Copy for IDE debugging
-└── README.md                       # This file
-    
+├── demo/
+│   ├── SimpleTest/                 # Simple browser demo
+│   │   ├── TestProject.vbp
+│   │   └── frmTest.frm
+│   └── WhatsappBot/                # WhatsApp Web bot demo
+│       ├── WhatsappBot.vbp
+│       └── frmWhatsappBot.frm
+└── README.md
 ```
 
 ---
