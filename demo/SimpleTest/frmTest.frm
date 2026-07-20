@@ -4,17 +4,21 @@ Begin VB.Form frmTest
    ClientHeight    =   6750
    ClientLeft      =   120
    ClientTop       =   465
-   ClientWidth     =   10200
+   ClientWidth     =   10215
    LinkTopic       =   "Form1"
    ScaleHeight     =   6750
-   ScaleWidth      =   10200
+   ScaleWidth      =   10215
    StartUpPosition =   2  'CenterScreen
    Begin TestProject.czWebview czWebview1 
-      Height          =   5775
-      Left            =   0
+      Height          =   5895
+      Left            =   120
       TabIndex        =   8
       Top             =   480
-      Width           =   10200
+      Width           =   9975
+      _ExtentX        =   17595
+      _ExtentY        =   10398
+      DeferredMask    =   48
+      DeferredValues  =   15311
    End
    Begin VB.CommandButton cmdDevTools 
       Caption         =   "F12"

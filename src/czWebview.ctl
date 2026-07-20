@@ -153,7 +153,7 @@ Public Event PermissionRequested(ByVal IsUserInitiated As Boolean, State As czWe
 Public Event ScriptDialogOpening(ByVal Kind As czWebView2ScriptDialogKind, Accept As Boolean, ResultText As String, ByVal URI As String, ByVal Message As String, ByVal DefaultText As String)
 Public Event AcceleratorKeyPressed(ByVal KeyState As czWebView2AccKeyState, ByVal IsExtendedKey As Boolean, ByVal WasKeyDown As Boolean, ByVal IsKeyReleased As Boolean, ByVal IsMenuKeyDown As Boolean, ByVal RepeatCount As Long, ByVal ScanCode As Long, Handled As Boolean)
 Public Event DownloadStarting(ByVal URI As String, ByVal MimeType As String, ByVal SuggestedPath As String, CancelDownload As Boolean, NewFilePath As String)
-Public Event WebResourceRequested(ByVal URI As String, ByVal ResourceContext As czWebView2ResourceFilter, Permit As czWebView2PermissionState)
+Public Event WebResourceRequested(ByVal URI As String, ByVal ResourceContext As czWebView2ResourceFilter, Handled As Boolean)
 Public Event WebResourceResponseReceived(ByVal ReqURI As String, ByVal ReqMethod As String, ByVal RespStatus As Long, ByVal RespReasonPhrase As String, RespHeaders As Collection)
 Public Event ContextMenuRequested(ByVal PageURI As String, ByVal LinkURI As String, ByVal SelectionText As String, ByVal ScreenX As Long, ByVal ScreenY As Long, Handled As Boolean)
 Public Event WebViewGotFocus()
@@ -180,11 +180,15 @@ Private Declare Function GetAvailableCoreWebView2BrowserVersionString Lib "WebVi
 Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
 Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+Private Declare Function MsgWaitForMultipleObjects Lib "user32" (ByVal nCount As Long, pHandles As Long, ByVal fWaitAll As Long, ByVal dwMilliseconds As Long, ByVal dwWakeMask As Long) As Long
 Private Declare Function CoWaitForMultipleHandles Lib "ole32" (ByVal dwFlags As Long, ByVal dwTimeout As Long, ByVal cHandles As Long, pHandles As Any, lpdwindex As Long) As Long
 Private Declare Function PeekMessage Lib "user32" Alias "PeekMessageW" (ByVal lpMsg As Long, ByVal hWnd As Long, ByVal wMsgFilterMin As Long, ByVal wMsgFilterMax As Long, ByVal wRemoveMsg As Long) As Long
 Private Declare Function TranslateMessage Lib "user32" (ByVal lpMsg As Long) As Long
 Private Declare Function DispatchMessage Lib "user32" Alias "DispatchMessageW" (ByVal lpMsg As Long) As Long
 Private Declare Function CreateStreamOnHGlobal Lib "ole32" (ByVal hGlobal As Long, ByVal fDeleteOnRelease As Long, ppstm As IVBStream) As Long
+Private Declare Function GlobalAlloc Lib "kernel32" (ByVal uFlags As Long, ByVal dwBytes As Long) As Long
+Private Declare Function GlobalLock Lib "kernel32" (ByVal hMem As Long) As Long
+Private Declare Function GlobalUnlock Lib "kernel32" (ByVal hMem As Long) As Long
 Private Declare Function GetFileAttributes Lib "kernel32" Alias "GetFileAttributesW" (ByVal lpFileName As Long) As Long
 
 Private Type APIMSG
@@ -212,6 +216,25 @@ Private Const RPC_E_TIMEOUT As Long = &H8001011F
 Private Const SECS_PER_DAY As Long = 86400
 Private Const STREAM_SEEK_SET As Long = 0
 Private Const STREAM_SEEK_END As Long = 2
+Private Const QS_ALLINPUT As Long = &H4FF
+Private Const GMEM_MOVEABLE As Long = &H2
+'--- Deferred settings bitmask flags
+Private Const DEF_SCRIPT As Long = 1
+Private Const DEF_WEBMSG As Long = 2
+Private Const DEF_DIALOGS As Long = 4
+Private Const DEF_STATUS As Long = 8
+Private Const DEF_DEVTOOLS As Long = &H10
+Private Const DEF_CTXMENU As Long = &H20
+Private Const DEF_HOSTOBJ As Long = &H40
+Private Const DEF_ZOOM As Long = &H80
+Private Const DEF_ERRORPAGE As Long = &H100
+Private Const DEF_ACCELKEYS As Long = &H200
+Private Const DEF_PWDSAVE As Long = &H400
+Private Const DEF_AUTOFILL As Long = &H800
+Private Const DEF_PINCH As Long = &H1000
+Private Const DEF_SWIPE As Long = &H2000
+'--- WebView2 default values (all True except DEF_PWDSAVE)
+Private Const DEF_WV2_DEFAULTS As Long = DEF_SCRIPT Or DEF_WEBMSG Or DEF_DIALOGS Or DEF_STATUS Or DEF_DEVTOOLS Or DEF_CTXMENU Or DEF_HOSTOBJ Or DEF_ZOOM Or DEF_ERRORPAGE Or DEF_ACCELKEYS Or DEF_AUTOFILL Or DEF_PINCH Or DEF_SWIPE
 
 '=========================================================================
 ' Member variables
@@ -239,6 +262,11 @@ Private m_cTokenSeq                 As Currency
 Private m_cScriptResults            As Collection
 Private m_sUserDataFolder           As String
 Private m_sInitialURL               As String
+Private m_cPendingCallbacks         As Collection
+Private m_lDeferredMask             As Long
+Private m_lDeferredValues           As Long
+Private m_sDeferredUserAgent        As String
+Private m_oCurrentResourceArgs      As IVBCoreWebView2WebResourceRequestedEventArgs  '--- held during WebResourceRequested event
 
 '=========================================================================
 ' Properties
@@ -299,168 +327,224 @@ End Property
 Public Property Get IsScriptEnabled() As Boolean
     If Not m_oSettings Is Nothing Then
         IsScriptEnabled = m_oSettings.IsScriptEnabled
+    Else
+        IsScriptEnabled = (m_lDeferredValues And DEF_SCRIPT) <> 0
     End If
 End Property
 
 Public Property Let IsScriptEnabled(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.IsScriptEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_SCRIPT, bValue
     End If
 End Property
 
 Public Property Get IsWebMessageEnabled() As Boolean
     If Not m_oSettings Is Nothing Then
         IsWebMessageEnabled = m_oSettings.IsWebMessageEnabled
+    Else
+        IsWebMessageEnabled = (m_lDeferredValues And DEF_WEBMSG) <> 0
     End If
 End Property
 
 Public Property Let IsWebMessageEnabled(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.IsWebMessageEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_WEBMSG, bValue
     End If
 End Property
 
 Public Property Get AreDefaultScriptDialogsEnabled() As Boolean
     If Not m_oSettings Is Nothing Then
         AreDefaultScriptDialogsEnabled = m_oSettings.AreDefaultScriptDialogsEnabled
+    Else
+        AreDefaultScriptDialogsEnabled = (m_lDeferredValues And DEF_DIALOGS) <> 0
     End If
 End Property
 
 Public Property Let AreDefaultScriptDialogsEnabled(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.AreDefaultScriptDialogsEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_DIALOGS, bValue
     End If
 End Property
 
 Public Property Get IsStatusBarEnabled() As Boolean
     If Not m_oSettings Is Nothing Then
         IsStatusBarEnabled = m_oSettings.IsStatusBarEnabled
+    Else
+        IsStatusBarEnabled = (m_lDeferredValues And DEF_STATUS) <> 0
     End If
 End Property
 
 Public Property Let IsStatusBarEnabled(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.IsStatusBarEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_STATUS, bValue
     End If
 End Property
 
 Public Property Get AreDevToolsEnabled() As Boolean
     If Not m_oSettings Is Nothing Then
         AreDevToolsEnabled = m_oSettings.AreDevToolsEnabled
+    Else
+        AreDevToolsEnabled = (m_lDeferredValues And DEF_DEVTOOLS) <> 0
     End If
 End Property
 
 Public Property Let AreDevToolsEnabled(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.AreDevToolsEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_DEVTOOLS, bValue
     End If
 End Property
 
 Public Property Get AreDefaultContextMenusEnabled() As Boolean
     If Not m_oSettings Is Nothing Then
         AreDefaultContextMenusEnabled = m_oSettings.AreDefaultContextMenusEnabled
+    Else
+        AreDefaultContextMenusEnabled = (m_lDeferredValues And DEF_CTXMENU) <> 0
     End If
 End Property
 
 Public Property Let AreDefaultContextMenusEnabled(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.AreDefaultContextMenusEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_CTXMENU, bValue
     End If
 End Property
 
 Public Property Get AreHostObjectsAllowed() As Boolean
     If Not m_oSettings Is Nothing Then
         AreHostObjectsAllowed = m_oSettings.AreHostObjectsAllowed
+    Else
+        AreHostObjectsAllowed = (m_lDeferredValues And DEF_HOSTOBJ) <> 0
     End If
 End Property
 
 Public Property Let AreHostObjectsAllowed(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.AreHostObjectsAllowed = -bValue
+    Else
+        pvSetDeferredBool DEF_HOSTOBJ, bValue
     End If
 End Property
 
 Public Property Get IsZoomControlEnabled() As Boolean
     If Not m_oSettings Is Nothing Then
         IsZoomControlEnabled = m_oSettings.IsZoomControlEnabled
+    Else
+        IsZoomControlEnabled = (m_lDeferredValues And DEF_ZOOM) <> 0
     End If
 End Property
 
 Public Property Let IsZoomControlEnabled(ByVal bValue As Boolean)
     If Not m_oSettings Is Nothing Then
         m_oSettings.IsZoomControlEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_ZOOM, bValue
     End If
 End Property
 
 Public Property Get UserAgent() As String
     If Not m_oSettings6 Is Nothing Then
         UserAgent = pvToString(m_oSettings6.UserAgent)
+    ElseIf LenB(m_sDeferredUserAgent) <> 0 Then
+        UserAgent = m_sDeferredUserAgent
     End If
 End Property
 
 Public Property Let UserAgent(ByVal sValue As String)
     If Not m_oSettings6 Is Nothing Then
         m_oSettings6.UserAgent = StrPtr(sValue)
+    Else
+        m_sDeferredUserAgent = sValue
     End If
 End Property
 
 Public Property Get AreBrowserAcceleratorKeysEnabled() As Boolean
     If Not m_oSettings6 Is Nothing Then
         AreBrowserAcceleratorKeysEnabled = m_oSettings6.AreBrowserAcceleratorKeysEnabled
+    Else
+        AreBrowserAcceleratorKeysEnabled = (m_lDeferredValues And DEF_ACCELKEYS) <> 0
     End If
 End Property
 
 Public Property Let AreBrowserAcceleratorKeysEnabled(ByVal bValue As Boolean)
     If Not m_oSettings6 Is Nothing Then
         m_oSettings6.AreBrowserAcceleratorKeysEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_ACCELKEYS, bValue
     End If
 End Property
 
 Public Property Get IsPasswordAutosaveEnabled() As Boolean
     If Not m_oSettings6 Is Nothing Then
         IsPasswordAutosaveEnabled = m_oSettings6.IsPasswordAutosaveEnabled
+    Else
+        IsPasswordAutosaveEnabled = (m_lDeferredValues And DEF_PWDSAVE) <> 0
     End If
 End Property
 
 Public Property Let IsPasswordAutosaveEnabled(ByVal bValue As Boolean)
     If Not m_oSettings6 Is Nothing Then
         m_oSettings6.IsPasswordAutosaveEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_PWDSAVE, bValue
     End If
 End Property
 
 Public Property Get IsGeneralAutofillEnabled() As Boolean
     If Not m_oSettings6 Is Nothing Then
         IsGeneralAutofillEnabled = m_oSettings6.IsGeneralAutofillEnabled
+    Else
+        IsGeneralAutofillEnabled = (m_lDeferredValues And DEF_AUTOFILL) <> 0
     End If
 End Property
 
 Public Property Let IsGeneralAutofillEnabled(ByVal bValue As Boolean)
     If Not m_oSettings6 Is Nothing Then
         m_oSettings6.IsGeneralAutofillEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_AUTOFILL, bValue
     End If
 End Property
 
 Public Property Get IsPinchZoomEnabled() As Boolean
     If Not m_oSettings6 Is Nothing Then
         IsPinchZoomEnabled = m_oSettings6.IsPinchZoomEnabled
+    Else
+        IsPinchZoomEnabled = (m_lDeferredValues And DEF_PINCH) <> 0
     End If
 End Property
 
 Public Property Let IsPinchZoomEnabled(ByVal bValue As Boolean)
     If Not m_oSettings6 Is Nothing Then
         m_oSettings6.IsPinchZoomEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_PINCH, bValue
     End If
 End Property
 
 Public Property Get IsSwipeNavigationEnabled() As Boolean
     If Not m_oSettings6 Is Nothing Then
         IsSwipeNavigationEnabled = m_oSettings6.IsSwipeNavigationEnabled
+    Else
+        IsSwipeNavigationEnabled = (m_lDeferredValues And DEF_SWIPE) <> 0
     End If
 End Property
 
 Public Property Let IsSwipeNavigationEnabled(ByVal bValue As Boolean)
     If Not m_oSettings6 Is Nothing Then
         m_oSettings6.IsSwipeNavigationEnabled = -bValue
+    Else
+        pvSetDeferredBool DEF_SWIPE, bValue
     End If
 End Property
 
@@ -639,8 +723,7 @@ Public Function ExecuteScript(ByVal sScript As String, Optional ByVal SecondsTim
     If SecondsTimeout <= 0 Then SecondsTimeout = m_dblTimeOutSeconds
     cToken = pvNextToken()
     sKey = "T" & cToken
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     m_oWebView.ExecuteScript StrPtr(sScript), oHandler
     m_cScriptResults.Add True, "P" & cToken
     If Not pvPumpUntilKey(m_cScriptResults, sKey, SecondsTimeout) Then
@@ -664,8 +747,7 @@ Public Sub ExecuteScriptAsync(ByVal sScript As String)
     On Error GoTo EH
     If m_oWebView Is Nothing Then Exit Sub
     cToken = pvNextToken()
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     m_oWebView.ExecuteScript StrPtr(sScript), oHandler
     m_cScriptResults.Add True, "A" & cToken
     Exit Sub
@@ -677,8 +759,7 @@ Public Sub AddScriptToExecuteOnDocumentCreated(ByVal sScript As String)
     Dim oHandler        As czWebviewCallback
     On Error GoTo EH
     If Not m_oWebView Is Nothing Then
-        Set oHandler = New czWebviewCallback
-        oHandler.InitOwner Me
+        Set oHandler = pvNewHandler()
         m_oWebView.AddScriptToExecuteOnDocumentCreated StrPtr(sScript), oHandler
     End If
     Exit Sub
@@ -738,6 +819,52 @@ EH:
     Debug.Print "czWebview.RemoveWebResourceRequestedFilter error: " & Err.Description
 End Sub
 
+'=========================================================================
+' SetWebResourceResponse — call from within WebResourceRequested event
+' to serve custom content (e.g. from czStorage byte arrays).
+'
+' Usage in event handler:
+'   Sub czWebview1_WebResourceRequested(URI, ResourceContext, Handled)
+'       czWebview1.SetWebResourceResponse 200, "text/html", bMyData()
+'       Handled = True
+'   End Sub
+'=========================================================================
+Public Sub SetWebResourceResponse(ByVal lStatusCode As Long, ByVal sMIMEType As String, bData() As Byte)
+    Dim oStream     As IVBStream
+    Dim oResponse   As IVBCoreWebView2WebResourceResponse
+    Dim hGlobal     As Long
+    Dim pMem        As Long
+    Dim lSize       As Long
+    Dim sHeaders    As String
+    Dim sReason     As String
+    On Error GoTo EH
+    If m_oCurrentResourceArgs Is Nothing Then
+        Err.Raise 5, "czWebview", "SetWebResourceResponse can only be called from within the WebResourceRequested event handler"
+    End If
+    '--- Build IStream from byte array
+    lSize = UBound(bData) - LBound(bData) + 1
+    hGlobal = GlobalAlloc(GMEM_MOVEABLE, lSize)
+    If hGlobal = 0 Then Err.Raise 7  '--- Out of memory
+    pMem = GlobalLock(hGlobal)
+    CopyMemory ByVal pMem, bData(LBound(bData)), lSize
+    GlobalUnlock hGlobal
+    CreateStreamOnHGlobal hGlobal, 1, oStream   '--- fDeleteOnRelease=True, stream owns the HGLOBAL
+    '--- Build response
+    sHeaders = "Content-Type: " & sMIMEType
+    If lStatusCode >= 200 And lStatusCode < 300 Then sReason = "OK" Else sReason = "Error"
+    Set oResponse = m_oEnvironment.CreateWebResourceResponse(oStream, lStatusCode, StrPtr(sReason), StrPtr(sHeaders))
+    m_oCurrentResourceArgs.Response = oResponse
+    Exit Sub
+EH:
+    Debug.Print "czWebview.SetWebResourceResponse error: " & Err.Description
+End Sub
+
+Public Sub SetWebResourceResponseString(ByVal lStatusCode As Long, ByVal sMIMEType As String, ByVal sContent As String)
+    Dim bUTF8() As Byte
+    bUTF8 = StrConv(sContent, vbFromUnicode)
+    SetWebResourceResponse lStatusCode, sMIMEType & "; charset=utf-8", bUTF8
+End Sub
+
 Public Sub SetVirtualHostNameToFolderMapping(ByVal HostName As String, ByVal FolderPath As String, Optional ByVal AccessKind As czWebView2HostResourceAccessKind = czHostResourceAccess_DENY)
     On Error GoTo EH
     If Not m_oWebView4 Is Nothing Then m_oWebView4.SetVirtualHostNameToFolderMapping StrPtr(HostName), StrPtr(FolderPath), AccessKind
@@ -778,8 +905,7 @@ Public Function CapturePreview(Optional ByVal ImageFormat As czWebView2ImageCapt
     If CreateStreamOnHGlobal(0, 1, oStream) < 0 Then Exit Function
     cToken = pvNextToken()
     sKey = "T" & cToken
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     m_oWebView.CapturePreview ImageFormat, oStream, oHandler
     If m_dblTimeOutSeconds <= 0 Then Exit Function
     m_cScriptResults.Add True, "P" & cToken
@@ -791,7 +917,8 @@ Public Function CapturePreview(Optional ByVal ImageFormat As czWebView2ImageCapt
     m_cScriptResults.Remove sKey
     If vItem(0) < 0 Then Exit Function
     oStream.Seek 0, STREAM_SEEK_END, cPos
-    lSize = cPos * 10000
+    If cPos * 10000@ > 2147483647@ Then Exit Function
+    lSize = CLng(cPos * 10000@)
     If lSize > 0 Then
         oStream.Seek 0, STREAM_SEEK_SET, cPos
         ReDim baResult(0 To lSize - 1)
@@ -813,8 +940,7 @@ Public Function PrintToPdf(ByVal ResultFilePath As String, Optional ByVal Second
     If m_oWebView11 Is Nothing Then Exit Function
     cToken = pvNextToken()
     sKey = "T" & cToken
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     m_oWebView11.PrintToPdf StrPtr(ResultFilePath), Nothing, oHandler
     If SecondsTimeout <= 0 Then
         PrintToPdf = True
@@ -844,8 +970,7 @@ Public Function CallDevToolsProtocolMethod(ByVal MethodName As String, ByVal Par
     If m_oWebView Is Nothing Then Exit Function
     cToken = pvNextToken()
     sKey = "T" & cToken
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     m_oWebView.CallDevToolsProtocolMethod StrPtr(MethodName), StrPtr(ParamsAsJSON), oHandler
     If m_dblTimeOutSeconds <= 0 Then Exit Function
     m_cScriptResults.Add True, "P" & cToken
@@ -875,8 +1000,7 @@ Public Function GetCookies(Optional ByVal URI As String, Optional ByVal SecondsT
     If oManager Is Nothing Then Exit Function
     cToken = pvNextToken()
     sKey = "T" & cToken
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     oManager.GetCookies StrPtr(URI), oHandler
     If SecondsTimeout <= 0 Then Exit Function
     m_cScriptResults.Add True, "P" & cToken
@@ -944,8 +1068,7 @@ Public Function TrySuspend(Optional ByVal SecondsTimeout As Double = 8) As Boole
     m_oController.IsVisible = 0
     cToken = pvNextToken()
     sKey = "T" & cToken
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     m_oWebView4.TrySuspend oHandler
     If SecondsTimeout <= 0 Then
         TrySuspend = True
@@ -986,8 +1109,7 @@ Public Function ClearBrowsingData(ByVal DataKinds As czWebView2BrowsingDataKinds
     If oProfile Is Nothing Then Exit Function
     cToken = pvNextToken()
     sKey = "T" & cToken
-    Set oHandler = New czWebviewCallback
-    oHandler.InitOwner Me, cToken
+    Set oHandler = pvNewHandler(cToken)
     oProfile.ClearBrowsingData DataKinds, oHandler
     If SecondsTimeout <= 0 Then
         ClearBrowsingData = True
@@ -1017,6 +1139,16 @@ End Sub
 Public Sub Shutdown()
     On Error Resume Next
     m_bShuttingDown = True
+    '--- Terminate all pending async callbacks
+    Dim i As Long
+    Dim oCb As czWebviewCallback
+    For i = 1 To m_cPendingCallbacks.Count
+        Set oCb = m_cPendingCallbacks(i)
+        oCb.Terminate
+    Next i
+    Set m_cPendingCallbacks = New Collection
+    Set m_cScriptResults = New Collection
+    '--- Release WebView2 objects
     Set m_oWebView = Nothing
     Set m_oWebView4 = Nothing
     Set m_oWebView11 = Nothing
@@ -1050,7 +1182,9 @@ End Sub
 Private Sub UserControl_Initialize()
     m_dblTimeOutSeconds = 8
     Set m_cScriptResults = New Collection
+    Set m_cPendingCallbacks = New Collection
     m_sInitialURL = "about:blank"
+    m_lDeferredValues = DEF_WV2_DEFAULTS
 End Sub
 
 Private Sub UserControl_InitProperties()
@@ -1060,11 +1194,17 @@ End Sub
 Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
     m_sInitialURL = PropBag.ReadProperty("URL", "about:blank")
     m_sUserDataFolder = PropBag.ReadProperty("UserDataFolder", "")
+    m_lDeferredMask = PropBag.ReadProperty("DeferredMask", 0)
+    m_lDeferredValues = PropBag.ReadProperty("DeferredValues", DEF_WV2_DEFAULTS)
+    m_sDeferredUserAgent = PropBag.ReadProperty("DeferredUserAgent", "")
 End Sub
 
 Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
     PropBag.WriteProperty "URL", m_sInitialURL, "about:blank"
     PropBag.WriteProperty "UserDataFolder", m_sUserDataFolder, ""
+    PropBag.WriteProperty "DeferredMask", m_lDeferredMask, 0
+    PropBag.WriteProperty "DeferredValues", m_lDeferredValues, DEF_WV2_DEFAULTS
+    PropBag.WriteProperty "DeferredUserAgent", m_sDeferredUserAgent, ""
 End Sub
 
 Private Sub UserControl_Show()
@@ -1164,7 +1304,7 @@ End Function
 
 Private Sub pvSpinMessagePump(Optional ByVal Flush As Boolean, Optional ByVal hWndFilter As Long, Optional ByVal FromMsg As Long, Optional ByVal ToMsg As Long)
     Dim uMsg As APIMSG
-    If Flush Then Call Sleep(1)
+    If Flush Then Call MsgWaitForMultipleObjects(0, ByVal 0&, 0, 10, QS_ALLINPUT)
     Call CoWaitForMultipleHandles(0, 0, 0, 0, 0)
     Do While PeekMessage(VarPtr(uMsg), hWndFilter, FromMsg, ToMsg, PM_REMOVE) <> 0
         Call TranslateMessage(VarPtr(uMsg))
@@ -1257,6 +1397,50 @@ Private Function pvSearchCollection(cCol As Collection, sKey As String) As Boole
     pvSearchCollection = (Err.Number = 0)
     On Error GoTo 0
 End Function
+
+Private Function pvNewHandler(Optional ByVal cToken As Currency) As czWebviewCallback
+    Set pvNewHandler = New czWebviewCallback
+    pvNewHandler.InitOwner Me, cToken
+    m_cPendingCallbacks.Add pvNewHandler
+End Function
+
+Private Sub pvSetDeferredBool(ByVal lBit As Long, ByVal bValue As Boolean)
+    If bValue Then
+        m_lDeferredValues = m_lDeferredValues Or lBit
+    Else
+        m_lDeferredValues = m_lDeferredValues And Not lBit
+    End If
+    m_lDeferredMask = m_lDeferredMask Or lBit
+End Sub
+
+Private Sub pvApplyDeferredSettings()
+    '--- Apply deferred boolean settings (bitmask)
+    If m_lDeferredMask <> 0 And Not m_oSettings Is Nothing Then
+        If (m_lDeferredMask And DEF_SCRIPT) <> 0 Then m_oSettings.IsScriptEnabled = -(CBool(m_lDeferredValues And DEF_SCRIPT))
+        If (m_lDeferredMask And DEF_WEBMSG) <> 0 Then m_oSettings.IsWebMessageEnabled = -(CBool(m_lDeferredValues And DEF_WEBMSG))
+        If (m_lDeferredMask And DEF_DIALOGS) <> 0 Then m_oSettings.AreDefaultScriptDialogsEnabled = -(CBool(m_lDeferredValues And DEF_DIALOGS))
+        If (m_lDeferredMask And DEF_STATUS) <> 0 Then m_oSettings.IsStatusBarEnabled = -(CBool(m_lDeferredValues And DEF_STATUS))
+        If (m_lDeferredMask And DEF_DEVTOOLS) <> 0 Then m_oSettings.AreDevToolsEnabled = -(CBool(m_lDeferredValues And DEF_DEVTOOLS))
+        If (m_lDeferredMask And DEF_CTXMENU) <> 0 Then m_oSettings.AreDefaultContextMenusEnabled = -(CBool(m_lDeferredValues And DEF_CTXMENU))
+        If (m_lDeferredMask And DEF_HOSTOBJ) <> 0 Then m_oSettings.AreHostObjectsAllowed = -(CBool(m_lDeferredValues And DEF_HOSTOBJ))
+        If (m_lDeferredMask And DEF_ZOOM) <> 0 Then m_oSettings.IsZoomControlEnabled = -(CBool(m_lDeferredValues And DEF_ZOOM))
+        If (m_lDeferredMask And DEF_ERRORPAGE) <> 0 Then m_oSettings.IsBuiltInErrorPageEnabled = -(CBool(m_lDeferredValues And DEF_ERRORPAGE))
+    End If
+    '--- Apply deferred Settings6 booleans
+    If m_lDeferredMask <> 0 And Not m_oSettings6 Is Nothing Then
+        If (m_lDeferredMask And DEF_ACCELKEYS) <> 0 Then m_oSettings6.AreBrowserAcceleratorKeysEnabled = -(CBool(m_lDeferredValues And DEF_ACCELKEYS))
+        If (m_lDeferredMask And DEF_PWDSAVE) <> 0 Then m_oSettings6.IsPasswordAutosaveEnabled = -(CBool(m_lDeferredValues And DEF_PWDSAVE))
+        If (m_lDeferredMask And DEF_AUTOFILL) <> 0 Then m_oSettings6.IsGeneralAutofillEnabled = -(CBool(m_lDeferredValues And DEF_AUTOFILL))
+        If (m_lDeferredMask And DEF_PINCH) <> 0 Then m_oSettings6.IsPinchZoomEnabled = -(CBool(m_lDeferredValues And DEF_PINCH))
+        If (m_lDeferredMask And DEF_SWIPE) <> 0 Then m_oSettings6.IsSwipeNavigationEnabled = -(CBool(m_lDeferredValues And DEF_SWIPE))
+    End If
+    '--- Apply deferred UserAgent
+    If LenB(m_sDeferredUserAgent) <> 0 And Not m_oSettings6 Is Nothing Then
+        m_oSettings6.UserAgent = StrPtr(m_sDeferredUserAgent)
+        m_sDeferredUserAgent = vbNullString
+    End If
+    m_lDeferredMask = 0
+End Sub
 
 Private Function pvGetCookieManager() As IVBCoreWebView2CookieManager
     On Error Resume Next
@@ -1355,6 +1539,8 @@ Friend Sub OnControllerCreated(ByVal hResult As Long, ByVal oCtrl As IVBCoreWebV
         m_oWebView4.add_WebResourceResponseReceived m_oEventSink
     End If
     On Error GoTo EH
+    '--- Apply deferred settings
+    pvApplyDeferredSettings
     '--- Size and show
     pvSyncSizeToHost
     m_oController.IsVisible = 1
@@ -1427,7 +1613,8 @@ Friend Sub OnPrintToPdfStream(ByVal hResult As Long, ByVal oPdfStream As IVBStre
     On Error GoTo EH
     If hResult >= 0 And Not oPdfStream Is Nothing Then
         oPdfStream.Seek 0, STREAM_SEEK_END, cPos
-        lSize = cPos * 10000
+        If cPos * 10000@ > 2147483647@ Then GoTo EH
+        lSize = CLng(cPos * 10000@)
         If lSize > 0 Then
             oPdfStream.Seek 0, STREAM_SEEK_SET, cPos
             ReDim baResult(0 To lSize - 1)
@@ -1526,17 +1713,20 @@ End Sub
 
 Friend Sub SinkWebResourceRequested(ByVal oArgs As IVBCoreWebView2WebResourceRequestedEventArgs)
     Dim oRequest As IVBCoreWebView2WebResourceRequest
-    Dim ePermit As czWebView2PermissionState
+    Dim bHandled As Boolean
     On Error GoTo EH
     Set oRequest = oArgs.Request
-    RaiseEvent WebResourceRequested(pvToString(oRequest.URI), oArgs.ResourceContext, ePermit)
-    If ePermit = czPERMISSION_STATE_DENY Then
-        Dim oResponse As IVBCoreWebView2WebResourceResponse
-        Set oResponse = m_oEnvironment.CreateWebResourceResponse(Nothing, 403, StrPtr("Forbidden"), 0)
-        oArgs.Response = oResponse
+    '--- Store args so SetWebResourceResponse can use them
+    Set m_oCurrentResourceArgs = oArgs
+    RaiseEvent WebResourceRequested(pvToString(oRequest.URI), oArgs.ResourceContext, bHandled)
+    Set m_oCurrentResourceArgs = Nothing
+    '--- If not handled by SetWebResourceResponse, block with 403
+    If Not bHandled Then
+        '--- Legacy permit/deny: if user didn't handle, allow by default
     End If
     Exit Sub
 EH:
+    Set m_oCurrentResourceArgs = Nothing
     Debug.Print "czWebview.SinkWebResourceRequested error: " & Err.Description
 End Sub
 
@@ -1544,12 +1734,34 @@ Friend Sub SinkWebResourceResponseReceived(ByVal oArgs As IVBCoreWebView2WebReso
     Dim oReq As IVBCoreWebView2WebResourceRequest
     Dim oResp As IVBCoreWebView2WebResourceResponseView
     Dim cHeaders As Collection
-    Dim oIter As IVBCoreWebView2HttpResponseHeaders
+    Dim oHdrs As IVBCoreWebView2HttpResponseHeaders
+    Dim oIter As IVBCoreWebView2HttpHeadersCollectionIterator
+    Dim lName As Long
+    Dim lValue As Long
+    Dim sHdrName As String
+    Dim sHdrValue As String
     On Error GoTo EH
     Set oReq = oArgs.Request
     Set oResp = oArgs.Response
     Set cHeaders = New Collection
-    '--- Parse response headers from the iterator
+    '--- Parse response headers
+    Set oHdrs = oResp.Headers
+    If Not oHdrs Is Nothing Then
+        Set oIter = oHdrs.GetIterator()
+        If Not oIter Is Nothing Then
+            Do While oIter.HasCurrentHeader <> 0
+                oIter.GetCurrentHeader lName, lValue
+                sHdrName = pvToString(lName)
+                sHdrValue = pvToString(lValue)
+                If LenB(sHdrName) <> 0 Then
+                    On Error Resume Next
+                    cHeaders.Add sHdrValue, sHdrName
+                    On Error GoTo EH
+                End If
+                If oIter.MoveNext() = 0 Then Exit Do
+            Loop
+        End If
+    End If
     RaiseEvent WebResourceResponseReceived(pvToString(oReq.URI), pvToString(oReq.Method), oResp.StatusCode, pvToString(oResp.ReasonPhrase), cHeaders)
     Exit Sub
 EH:

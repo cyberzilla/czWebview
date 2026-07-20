@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>czCalc</title>
+<link rel="stylesheet" href="{{STYLE}}">
+</head>
+<body>
+<div class="calc-container">
+  <div class="calc-display">
+    <div class="calc-expression" id="expression"></div>
+    <div class="calc-result" id="result">0</div>
+  </div>
+  <div class="calc-buttons">
+    <button class="btn btn-fn" onclick="clearAll()">AC</button>
+    <button class="btn btn-fn" onclick="toggleSign()">&plusmn;</button>
+    <button class="btn btn-fn" onclick="percentage()">%</button>
+    <button class="btn btn-op" onclick="appendOp('/')">&divide;</button>
+
+    <button class="btn" onclick="appendNum('7')">7</button>
+    <button class="btn" onclick="appendNum('8')">8</button>
+    <button class="btn" onclick="appendNum('9')">9</button>
+    <button class="btn btn-op" onclick="appendOp('*')">&times;</button>
+
+    <button class="btn" onclick="appendNum('4')">4</button>
+    <button class="btn" onclick="appendNum('5')">5</button>
+    <button class="btn" onclick="appendNum('6')">6</button>
+    <button class="btn btn-op" onclick="appendOp('-')">&minus;</button>
+
+    <button class="btn" onclick="appendNum('1')">1</button>
+    <button class="btn" onclick="appendNum('2')">2</button>
+    <button class="btn" onclick="appendNum('3')">3</button>
+    <button class="btn btn-op" onclick="appendOp('+')">+</button>
+
+    <button class="btn btn-wide" onclick="appendNum('0')">0</button>
+    <button class="btn" onclick="appendDot()">.</button>
+    <button class="btn btn-eq" onclick="calculate()">=</button>
+  </div>
+</div>
+<script src="{{SCRIPT}}"></script>
+</body>
+</html>

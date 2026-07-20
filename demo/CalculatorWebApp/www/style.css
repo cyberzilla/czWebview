@@ -1,0 +1,173 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { overflow: hidden; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.calc-container {
+  width: 320px;
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow:
+    0 32px 64px rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+/* ===== Display ===== */
+.calc-display {
+  padding: 32px 24px 20px;
+  text-align: right;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.calc-expression {
+  font-size: 15px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.4);
+  min-height: 22px;
+  letter-spacing: 0.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calc-result {
+  font-size: 48px;
+  font-weight: 300;
+  color: #fff;
+  letter-spacing: -1px;
+  line-height: 1.1;
+  transition: all 0.15s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calc-result.flash {
+  animation: flash 0.15s ease;
+}
+
+@keyframes flash {
+  0%   { opacity: 0.5; transform: scale(0.97); }
+  100% { opacity: 1;   transform: scale(1); }
+}
+
+/* ===== Buttons Grid ===== */
+.calc-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: rgba(255,255,255,0.04);
+  padding: 1px;
+}
+
+.btn {
+  height: 68px;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 400;
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+  transition: all 0.12s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.15), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.btn:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.btn:active::after {
+  opacity: 1;
+}
+
+.btn:active {
+  transform: scale(0.95);
+}
+
+/* Function buttons (AC, ±, %) */
+.btn-fn {
+  color: #a8e6cf;
+  font-weight: 500;
+  background: rgba(168,230,207,0.08);
+}
+
+.btn-fn:hover {
+  background: rgba(168,230,207,0.15);
+}
+
+/* Operator buttons */
+.btn-op {
+  color: #ffd93d;
+  font-size: 24px;
+  font-weight: 500;
+  background: rgba(255,217,61,0.08);
+}
+
+.btn-op:hover {
+  background: rgba(255,217,61,0.15);
+}
+
+.btn-op.active {
+  background: rgba(255,217,61,0.25);
+  box-shadow: inset 0 0 20px rgba(255,217,61,0.1);
+}
+
+/* Zero button (wide) */
+.btn-wide {
+  grid-column: span 2;
+}
+
+/* Equals button */
+.btn-eq {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.btn-eq:hover {
+  background: linear-gradient(135deg, #7b93f5, #8b5cb8);
+}
+
+.btn-eq:active {
+  background: linear-gradient(135deg, #5568d4, #654092);
+}
+
+/* Bottom corners */
+.calc-buttons .btn:nth-last-child(1) {
+  border-radius: 0 0 24px 0;
+}
+.calc-buttons .btn:nth-last-child(3) {
+  border-radius: 0 0 0 24px;
+}
