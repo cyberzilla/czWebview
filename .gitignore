@@ -1,0 +1,36 @@
+# VB6 Project Files
+*.vbw
+*.log
+*.scc
+
+# Compiled Binaries
+*.exe
+*.dll
+*.ocx
+*.exp
+*.lib
+
+# Do NOT ignore these specific DLLs needed by the project
+!external/WebView2Loader.dll
+!demo/SimpleTest/WebView2Loader.dll
+!demo/WhatsappBot/WebView2Loader.dll
+!demo/CalculatorWebApp/WebView2Loader.dll
+
+# VB6 IDE temp files
+*.tmp
+*.bak
+~*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# VS Code
+.vscode/
+
+# User data folders (WebView2 runtime data)
+UserData/
+WebView2Data/
+EBWebView/

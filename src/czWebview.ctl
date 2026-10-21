@@ -13,10 +13,15 @@ Attribute VB_Creatable = True
 Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
-' czWebview UserControl
+' czWebview UserControl v1.0.0
 ' Zero-dependency WebView2 wrapper for VB6 — full-featured, matching
 ' wqweto's cWebView2 API surface. Requires czWebview.tlb (type library
 ' reference) and WebView2Loader.dll at runtime.
+'
+' Version: 1.0.0
+' License: MIT
+' Author:  Abu Dzakiyyah
+' URL:     https://github.com/cyberzilla/czWebview
 '
 ' Architecture:
 '   - czWebviewCallback.cls handles ALL callback/handler interfaces
@@ -271,6 +276,10 @@ Private m_oCurrentResourceArgs      As IVBCoreWebView2WebResourceRequestedEventA
 '=========================================================================
 ' Properties
 '=========================================================================
+
+Public Property Get Version() As String
+    Version = "1.0.0"
+End Property
 
 Public Property Get IsInitialized() As Boolean
     IsInitialized = (Not m_oWebView Is Nothing)
