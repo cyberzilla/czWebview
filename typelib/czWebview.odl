@@ -130,6 +130,7 @@ library czWebviewLib
     interface IVBCoreWebView2_13;
     interface IVBCoreWebView2_16;
     interface IVBCoreWebView2Controller;
+    interface IVBCoreWebView2Controller2;
     interface IVBCoreWebView2Environment;
     interface IVBCoreWebView2Environment2;
     interface IVBCoreWebView2Environment6;
@@ -992,6 +993,16 @@ library czWebviewLib
         HRESULT NotifyParentWindowPositionChanged();
         HRESULT Close();
         [propget] HRESULT CoreWebView2([out, retval] IVBCoreWebView2** coreWebView2);
+    };
+
+    // ================================================================
+    // Controller2 — extends Controller with DefaultBackgroundColor
+    // ================================================================
+    [uuid(C979903E-D4CA-4228-92EB-47EE3FA96EAB), odl, version(1.0)]
+    interface IVBCoreWebView2Controller2 : IVBCoreWebView2Controller
+    {
+        [propget] HRESULT DefaultBackgroundColor([out, retval] long* backgroundColor);
+        [propput] HRESULT DefaultBackgroundColor([in] long backgroundColor);
     };
 
     // ================================================================

@@ -18,7 +18,7 @@ Attribute VB_Exposed = False
 ' wqweto's cWebView2 API surface. Requires czWebview.tlb (type library
 ' reference) and WebView2Loader.dll at runtime.
 '
-' Version: 1.0.0
+' Version: 1.1.0
 ' License: MIT
 ' Author:  Abu Dzakiyyah
 ' URL:     https://github.com/cyberzilla/czWebview
@@ -272,13 +272,16 @@ Private m_lDeferredMask             As Long
 Private m_lDeferredValues           As Long
 Private m_sDeferredUserAgent        As String
 Private m_oCurrentResourceArgs      As IVBCoreWebView2WebResourceRequestedEventArgs  '--- held during WebResourceRequested event
+Private m_oController2              As IVBCoreWebView2Controller2
+Private m_sLoaderPath               As String               '--- custom path for WebView2Loader.dll
+Private m_lDefaultBgColor           As Long                 '--- COREWEBVIEW2_COLOR as packed Long (-1 = not set)
 
 '=========================================================================
 ' Properties
 '=========================================================================
 
 Public Property Get Version() As String
-    Version = "1.0.0"
+    Version = "1.1.0"
 End Property
 
 Public Property Get IsInitialized() As Boolean
@@ -613,6 +616,34 @@ End Property
 
 Public Property Let UserDataFolder(ByVal sValue As String)
     m_sUserDataFolder = sValue
+End Property
+
+'--- Custom path for WebView2Loader.dll (checked first before default search)
+Public Property Get LoaderPath() As String
+    LoaderPath = m_sLoaderPath
+End Property
+
+Public Property Let LoaderPath(ByVal sValue As String)
+    m_sLoaderPath = sValue
+End Property
+
+'--- Default background color for the WebView2 control (OLE_COLOR format)
+'    Set BEFORE calling Init to avoid white flash. Uses ICoreWebView2Controller2.
+Public Property Get DefaultBackgroundColor() As OLE_COLOR
+    If Not m_oController2 Is Nothing Then
+        Dim lWV2 As Long
+        lWV2 = m_oController2.DefaultBackgroundColor
+        DefaultBackgroundColor = pvWV2ColorToOle(lWV2)
+    ElseIf m_lDefaultBgColor <> -1 Then
+        DefaultBackgroundColor = pvWV2ColorToOle(m_lDefaultBgColor)
+    End If
+End Property
+
+Public Property Let DefaultBackgroundColor(ByVal clr As OLE_COLOR)
+    m_lDefaultBgColor = pvOleColorToWV2(clr)
+    If Not m_oController2 Is Nothing Then
+        m_oController2.DefaultBackgroundColor = m_lDefaultBgColor
+    End If
 End Property
 
 '=========================================================================
@@ -1163,6 +1194,7 @@ Public Sub Shutdown()
     Set m_oWebView11 = Nothing
     Set m_oWebView13 = Nothing
     Set m_oWebView16 = Nothing
+    Set m_oController2 = Nothing
     If Not m_oController Is Nothing Then
         m_oController.Close
         Set m_oController = Nothing
@@ -1194,6 +1226,7 @@ Private Sub UserControl_Initialize()
     Set m_cPendingCallbacks = New Collection
     m_sInitialURL = "about:blank"
     m_lDeferredValues = DEF_WV2_DEFAULTS
+    m_lDefaultBgColor = -1
 End Sub
 
 Private Sub UserControl_InitProperties()
@@ -1206,6 +1239,8 @@ Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
     m_lDeferredMask = PropBag.ReadProperty("DeferredMask", 0)
     m_lDeferredValues = PropBag.ReadProperty("DeferredValues", DEF_WV2_DEFAULTS)
     m_sDeferredUserAgent = PropBag.ReadProperty("DeferredUserAgent", "")
+    m_sLoaderPath = PropBag.ReadProperty("LoaderPath", "")
+    m_lDefaultBgColor = PropBag.ReadProperty("DefaultBgColor", -1)
 End Sub
 
 Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
@@ -1214,6 +1249,8 @@ Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
     PropBag.WriteProperty "DeferredMask", m_lDeferredMask, 0
     PropBag.WriteProperty "DeferredValues", m_lDeferredValues, DEF_WV2_DEFAULTS
     PropBag.WriteProperty "DeferredUserAgent", m_sDeferredUserAgent, ""
+    PropBag.WriteProperty "LoaderPath", m_sLoaderPath, ""
+    PropBag.WriteProperty "DefaultBgColor", m_lDefaultBgColor, -1
 End Sub
 
 Private Sub UserControl_Show()
@@ -1346,14 +1383,34 @@ Private Function pvNextToken() As Currency
     pvNextToken = m_cTokenSeq
 End Function
 
+'--- Convert OLE_COLOR (&H00BBGGRR) to COREWEBVIEW2_COLOR {A,R,G,B} packed Long
+Private Function pvOleColorToWV2(ByVal clr As Long) As Long
+    Dim ab(0 To 3) As Byte
+    ab(0) = 255                              '--- Alpha (fully opaque)
+    ab(1) = clr And &HFF&                    '--- Red
+    ab(2) = (clr \ &H100&) And &HFF&         '--- Green
+    ab(3) = (clr \ &H10000) And &HFF&        '--- Blue
+    CopyMemory pvOleColorToWV2, ab(0), 4
+End Function
+
+'--- Convert COREWEBVIEW2_COLOR packed Long to OLE_COLOR (&H00BBGGRR)
+Private Function pvWV2ColorToOle(ByVal lWV2 As Long) As Long
+    Dim ab(0 To 3) As Byte
+    CopyMemory ab(0), lWV2, 4
+    pvWV2ColorToOle = CLng(ab(1)) Or (CLng(ab(2)) * &H100&) Or (CLng(ab(3)) * &H10000)
+End Function
+
 Private Function pvEnsureLoader() As Boolean
     Dim sLoader As String
     If GetModuleHandle(StrPtr("WebView2Loader.dll")) <> 0 Then
         pvEnsureLoader = True
         Exit Function
     End If
+    '--- Check custom LoaderPath first (if set)
+    If LenB(m_sLoaderPath) <> 0 And pvFileExists(m_sLoaderPath) Then
+        sLoader = m_sLoaderPath
     '--- Search: App.Path, App.Path\External, then walk up parent dirs
-    If pvFileExists(App.Path & "\WebView2Loader.dll") Then
+    ElseIf pvFileExists(App.Path & "\WebView2Loader.dll") Then
         sLoader = App.Path & "\WebView2Loader.dll"
     Else
         sLoader = pvLocateFile(App.Path & "\External\WebView2Loader.dll")
@@ -1504,7 +1561,12 @@ Friend Sub OnControllerCreated(ByVal hResult As Long, ByVal oCtrl As IVBCoreWebV
     Set m_oWebView11 = m_oWebView
     Set m_oWebView13 = m_oWebView
     Set m_oWebView16 = m_oWebView
+    Set m_oController2 = m_oController    '--- Controller2 for DefaultBackgroundColor
     On Error GoTo EH
+    '--- Apply deferred DefaultBackgroundColor
+    If m_lDefaultBgColor <> -1 And Not m_oController2 Is Nothing Then
+        m_oController2.DefaultBackgroundColor = m_lDefaultBgColor
+    End If
     '--- Register ALL events via the event sink callback
     m_oWebView.add_NavigationStarting m_oEventSink
     m_oWebView.add_NavigationCompleted m_oEventSink
