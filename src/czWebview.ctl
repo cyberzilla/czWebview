@@ -187,6 +187,7 @@ Private Declare Function RegOpenKeyExW Lib "advapi32" (ByVal hKey As Long, ByVal
 Private Declare Function RegQueryValueExW Lib "advapi32" (ByVal hKey As Long, ByVal lpValueName As Long, ByVal lpReserved As Long, lpType As Long, ByVal lpData As Long, lpcbData As Long) As Long
 Private Declare Function RegCloseKey Lib "advapi32" (ByVal hKey As Long) As Long
 Private Declare Function FreeLibrary Lib "kernel32" (ByVal hLibModule As Long) As Long
+Private Declare Function SetDllDirectoryW Lib "kernel32" (ByVal lpPathName As Long) As Long
 Private m_hRuntimeDll As Long       '--- handle to EmbeddedBrowserWebView.dll
 Private m_pfnCreate   As Long       '--- proc address for CreateWebViewEnvironmentWithOptionsInternal
 Private m_sRuntimeFolder As String   '--- browser executable folder (for direct loading)
@@ -1445,7 +1446,10 @@ Private Function pvEnsureLoader() As Boolean
     Dim sDll As String
     sDll = sRuntimePath & "\EmbeddedBrowserWebView.dll"
     If Not pvFileExists(sDll) Then Exit Function
+    '--- Set DLL search path so dependencies resolve from runtime folder
+    SetDllDirectoryW StrPtr(sRuntimePath)
     m_hRuntimeDll = LoadLibrary(StrPtr(sDll))
+    SetDllDirectoryW 0  '--- reset to default
     If m_hRuntimeDll = 0 Then Exit Function
     m_pfnCreate = GetProcAddress(m_hRuntimeDll, "CreateWebViewEnvironmentWithOptionsInternal")
     If m_pfnCreate = 0 Then
