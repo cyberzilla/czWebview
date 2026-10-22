@@ -12,7 +12,7 @@ Attribute VB_Creatable = True
 Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
-' CLASS: czWebviewCallback
+' CLASS: czWebviewCallback v1.2.0
 ' Internal companion class for czWebview UserControl.
 ' Full-featured callback handler matching wqweto's cWebView2Callback.
 ' Handles:

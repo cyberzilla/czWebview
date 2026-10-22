@@ -13,7 +13,7 @@ Attribute VB_Creatable = True
 Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
-' czWebview UserControl v1.0.0
+' czWebview UserControl v1.2.0
 ' Zero-dependency WebView2 wrapper for VB6 — full-featured, matching
 ' wqweto's cWebView2 API surface. Requires czWebview.tlb (type library
 ' reference) and WebView2Loader.dll at runtime.
