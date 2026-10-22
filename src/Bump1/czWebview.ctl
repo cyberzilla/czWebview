@@ -1464,29 +1464,59 @@ Private Function pvTryWebView2Loader() As Boolean
 End Function
 
 Private Function pvFindWebView2Runtime() As String
-    '--- Find WebView2 Runtime via registry
-    Dim sPath As String
+    '--- Find WebView2 Runtime via registry and filesystem
+    Dim sPath As String, sVer As String, sDll As String
     Const HKLM As Long = &H80000002
     Const HKCU As Long = &H80000001
     Const KEY_READ As Long = &H20019
     Const KEY_WOW64_32KEY As Long = &H200
     Const KEY_WOW64_64KEY As Long = &H100
-    Dim sSubKey As String
-    sSubKey = "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BEE-73A2BFB5C29F}"
-    '--- Try HKLM 32-bit
-    sPath = pvRegReadString(HKLM, sSubKey, "location", KEY_READ Or KEY_WOW64_32KEY)
-    If LenB(sPath) <> 0 And pvFileExists(sPath & "\EmbeddedBrowserWebView.dll") Then
-        pvFindWebView2Runtime = sPath: Exit Function
+    '--- WebView2 Runtime GUIDs (both known variants)
+    Dim vGuids As Variant, i As Long
+    vGuids = Array( _
+        "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}", _
+        "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BEE-73A2BFB5C29F}")
+    '--- Try each GUID in HKLM (32-bit, 64-bit) and HKCU
+    Dim vSam As Variant, j As Long
+    vSam = Array(KEY_READ Or KEY_WOW64_32KEY, KEY_READ Or KEY_WOW64_64KEY, KEY_READ)
+    Dim vRoot As Variant, k As Long
+    vRoot = Array(HKLM, HKLM, HKCU)
+    For i = 0 To UBound(vGuids)
+        For j = 0 To UBound(vSam)
+            sPath = pvRegReadString(vRoot(j), CStr(vGuids(i)), "location", CLng(vSam(j)))
+            sVer = pvRegReadString(vRoot(j), CStr(vGuids(i)), "pv", CLng(vSam(j)))
+            If LenB(sPath) <> 0 Then
+                sDll = pvLocateRuntimeDll(sPath, sVer)
+                If LenB(sDll) <> 0 Then
+                    pvFindWebView2Runtime = sDll
+                    Exit Function
+                End If
+            End If
+        Next j
+    Next i
+End Function
+
+Private Function pvLocateRuntimeDll(ByVal sBase As String, ByVal sVer As String) As String
+    '--- Search common paths for EmbeddedBrowserWebView.dll
+    Dim sDll As String
+    sDll = "EmbeddedBrowserWebView.dll"
+    '--- 1. <base>\<ver>\EBWebView\x86\ (modern layout, VB6 = 32-bit)
+    If LenB(sVer) <> 0 Then
+        If pvFileExists(sBase & "\" & sVer & "\EBWebView\x86\" & sDll) Then
+            pvLocateRuntimeDll = sBase & "\" & sVer & "\EBWebView\x86": Exit Function
+        End If
+        '--- 2. <base>\<ver>\ (older layout)
+        If pvFileExists(sBase & "\" & sVer & "\" & sDll) Then
+            pvLocateRuntimeDll = sBase & "\" & sVer: Exit Function
+        End If
     End If
-    '--- Try HKLM 64-bit
-    sPath = pvRegReadString(HKLM, sSubKey, "location", KEY_READ Or KEY_WOW64_64KEY)
-    If LenB(sPath) <> 0 And pvFileExists(sPath & "\EmbeddedBrowserWebView.dll") Then
-        pvFindWebView2Runtime = sPath: Exit Function
+    '--- 3. <base>\EBWebView\x86\
+    If pvFileExists(sBase & "\EBWebView\x86\" & sDll) Then
+        pvLocateRuntimeDll = sBase & "\EBWebView\x86": Exit Function
     End If
-    '--- Try HKCU
-    sPath = pvRegReadString(HKCU, sSubKey, "location", KEY_READ)
-    If LenB(sPath) <> 0 And pvFileExists(sPath & "\EmbeddedBrowserWebView.dll") Then
-        pvFindWebView2Runtime = sPath: Exit Function
+    '--- 4. <base>\ (direct)
+    If pvFileExists(sBase & "\" & sDll) Then
+        pvLocateRuntimeDll = sBase: Exit Function
     End If
 End Function
 

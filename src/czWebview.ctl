@@ -18,7 +18,7 @@ Attribute VB_Exposed = False
 ' wqweto's cWebView2 API surface. Requires czWebview.tlb (type library
 ' reference) and WebView2Loader.dll at runtime.
 '
-' Version: 1.1.0
+' Version: 1.2.0
 ' License: MIT
 ' Author:  Abu Dzakiyyah
 ' URL:     https://github.com/cyberzilla/czWebview
@@ -180,8 +180,15 @@ Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryW" (ByVal 
 Private Declare Function GetClientRect Lib "user32" (ByVal hWnd As Long, lpRect As APIRECT) As Long
 Private Declare Function SysReAllocString Lib "oleaut32" (ByVal pBSTR As Long, ByVal lpsz As Long) As Long
 Private Declare Sub CoTaskMemFree Lib "ole32" (ByVal pv As Long)
-Private Declare Function CreateCoreWebView2EnvironmentWithOptions Lib "WebView2Loader" (ByVal browserExecutableFolder As Long, ByVal UserDataFolder As Long, ByVal environmentOptions As Long, ByVal environmentCreatedHandler As Long) As Long
-Private Declare Function GetAvailableCoreWebView2BrowserVersionString Lib "WebView2Loader" (ByVal browserExecutableFolder As Long, versionInfo As Long) As Long
+'--- WebView2 runtime direct loading (no WebView2Loader.dll dependency)
+Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
+Private Declare Function pvCallFuncPtr Lib "user32" Alias "CallWindowProcW" (ByVal pfn As Long, ByVal p1 As Long, ByVal p2 As Long, ByVal p3 As Long, ByVal p4 As Long) As Long
+Private Declare Function RegOpenKeyExW Lib "advapi32" (ByVal hKey As Long, ByVal lpSubKey As Long, ByVal ulOptions As Long, ByVal samDesired As Long, phkResult As Long) As Long
+Private Declare Function RegQueryValueExW Lib "advapi32" (ByVal hKey As Long, ByVal lpValueName As Long, ByVal lpReserved As Long, lpType As Long, ByVal lpData As Long, lpcbData As Long) As Long
+Private Declare Function RegCloseKey Lib "advapi32" (ByVal hKey As Long) As Long
+Private Declare Function FreeLibrary Lib "kernel32" (ByVal hLibModule As Long) As Long
+Private m_hRuntimeDll As Long       '--- handle to EmbeddedBrowserWebView.dll
+Private m_pfnCreate   As Long       '--- proc address for CreateWebViewEnvironmentWithOptionsInternal
 Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
 Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
@@ -281,7 +288,7 @@ Private m_lDefaultBgColor           As Long                 '--- COREWEBVIEW2_CO
 '=========================================================================
 
 Public Property Get Version() As String
-    Version = "1.1.0"
+    Version = "1.2.0"
 End Property
 
 Public Property Get IsInitialized() As Boolean
@@ -1195,6 +1202,9 @@ Public Sub Shutdown()
     Set m_oWebView13 = Nothing
     Set m_oWebView16 = Nothing
     Set m_oController2 = Nothing
+    '--- Free runtime DLL if loaded directly
+    If m_hRuntimeDll <> 0 Then FreeLibrary m_hRuntimeDll: m_hRuntimeDll = 0
+    m_pfnCreate = 0
     If Not m_oController Is Nothing Then
         m_oController.Close
         Set m_oController = Nothing
@@ -1303,7 +1313,7 @@ Private Function pvCreateWebView2Environment( _
     If LenB(sUserDataFolder) = 0 Then
         sUserDataFolder = Environ$("LOCALAPPDATA") & "\" & UCase$(App.EXEName)
     End If
-    pvCreateWebView2Environment = CreateCoreWebView2EnvironmentWithOptions(StrPtr(sBrowserExecutableFolder), StrPtr(sUserDataFolder), ObjPtr(oOptions), ObjPtr(oHandler))
+    pvCreateWebView2Environment = pvCallFuncPtr(m_pfnCreate, StrPtr(sBrowserExecutableFolder), StrPtr(sUserDataFolder), ObjPtr(oOptions), ObjPtr(oHandler))
     Exit Function
 EH:
     pvCreateWebView2Environment = Err.Number
@@ -1401,23 +1411,130 @@ Private Function pvWV2ColorToOle(ByVal lWV2 As Long) As Long
 End Function
 
 Private Function pvEnsureLoader() As Boolean
-    Dim sLoader As String
-    If GetModuleHandle(StrPtr("WebView2Loader.dll")) <> 0 Then
+    '--- Already loaded?
+    If m_pfnCreate <> 0 Then
         pvEnsureLoader = True
         Exit Function
     End If
-    '--- Check custom LoaderPath first (if set)
+    '--- Try WebView2Loader.dll first (backward compatible)
+    If pvTryWebView2Loader() Then
+        pvEnsureLoader = True
+        Exit Function
+    End If
+    '--- Direct runtime loading (no WebView2Loader.dll needed)
+    Dim sRuntimePath As String
+    sRuntimePath = pvFindWebView2Runtime()
+    If LenB(sRuntimePath) = 0 Then Exit Function
+    Dim sDll As String
+    sDll = sRuntimePath & "\EmbeddedBrowserWebView.dll"
+    If Not pvFileExists(sDll) Then Exit Function
+    m_hRuntimeDll = LoadLibrary(StrPtr(sDll))
+    If m_hRuntimeDll = 0 Then Exit Function
+    m_pfnCreate = GetProcAddress(m_hRuntimeDll, "CreateWebViewEnvironmentWithOptionsInternal")
+    If m_pfnCreate = 0 Then
+        FreeLibrary m_hRuntimeDll
+        m_hRuntimeDll = 0
+        Exit Function
+    End If
+    pvEnsureLoader = True
+End Function
+
+Private Function pvTryWebView2Loader() As Boolean
+    '--- Check if WebView2Loader.dll is available (legacy/bundled mode)
+    Dim sLoader As String
+    If GetModuleHandle(StrPtr("WebView2Loader.dll")) <> 0 Then
+        pvTryWebView2Loader = True
+        Exit Function
+    End If
     If LenB(m_sLoaderPath) <> 0 And pvFileExists(m_sLoaderPath) Then
         sLoader = m_sLoaderPath
-    '--- Search: App.Path, App.Path\External, then walk up parent dirs
     ElseIf pvFileExists(App.Path & "\WebView2Loader.dll") Then
         sLoader = App.Path & "\WebView2Loader.dll"
     Else
         sLoader = pvLocateFile(App.Path & "\External\WebView2Loader.dll")
     End If
     If LenB(sLoader) <> 0 Then
-        pvEnsureLoader = (LoadLibrary(StrPtr(sLoader)) <> 0)
+        Dim hMod As Long
+        hMod = LoadLibrary(StrPtr(sLoader))
+        If hMod <> 0 Then
+            m_pfnCreate = GetProcAddress(hMod, "CreateCoreWebView2EnvironmentWithOptions")
+            pvTryWebView2Loader = (m_pfnCreate <> 0)
+        End If
     End If
+End Function
+
+Private Function pvFindWebView2Runtime() As String
+    '--- Find WebView2 Runtime via registry and filesystem
+    Dim sPath As String, sVer As String, sDll As String
+    Const HKLM As Long = &H80000002
+    Const HKCU As Long = &H80000001
+    Const KEY_READ As Long = &H20019
+    Const KEY_WOW64_32KEY As Long = &H200
+    Const KEY_WOW64_64KEY As Long = &H100
+    '--- WebView2 Runtime GUIDs (both known variants)
+    Dim vGuids As Variant, i As Long
+    vGuids = Array( _
+        "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}", _
+        "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BEE-73A2BFB5C29F}")
+    '--- Try each GUID in HKLM (32-bit, 64-bit) and HKCU
+    Dim vSam As Variant, j As Long
+    vSam = Array(KEY_READ Or KEY_WOW64_32KEY, KEY_READ Or KEY_WOW64_64KEY, KEY_READ)
+    Dim vRoot As Variant, k As Long
+    vRoot = Array(HKLM, HKLM, HKCU)
+    For i = 0 To UBound(vGuids)
+        For j = 0 To UBound(vSam)
+            sPath = pvRegReadString(vRoot(j), CStr(vGuids(i)), "location", CLng(vSam(j)))
+            sVer = pvRegReadString(vRoot(j), CStr(vGuids(i)), "pv", CLng(vSam(j)))
+            If LenB(sPath) <> 0 Then
+                sDll = pvLocateRuntimeDll(sPath, sVer)
+                If LenB(sDll) <> 0 Then
+                    pvFindWebView2Runtime = sDll
+                    Exit Function
+                End If
+            End If
+        Next j
+    Next i
+End Function
+
+Private Function pvLocateRuntimeDll(ByVal sBase As String, ByVal sVer As String) As String
+    '--- Search common paths for EmbeddedBrowserWebView.dll
+    Dim sDll As String
+    sDll = "EmbeddedBrowserWebView.dll"
+    '--- 1. <base>\<ver>\EBWebView\x86\ (modern layout, VB6 = 32-bit)
+    If LenB(sVer) <> 0 Then
+        If pvFileExists(sBase & "\" & sVer & "\EBWebView\x86\" & sDll) Then
+            pvLocateRuntimeDll = sBase & "\" & sVer & "\EBWebView\x86": Exit Function
+        End If
+        '--- 2. <base>\<ver>\ (older layout)
+        If pvFileExists(sBase & "\" & sVer & "\" & sDll) Then
+            pvLocateRuntimeDll = sBase & "\" & sVer: Exit Function
+        End If
+    End If
+    '--- 3. <base>\EBWebView\x86\
+    If pvFileExists(sBase & "\EBWebView\x86\" & sDll) Then
+        pvLocateRuntimeDll = sBase & "\EBWebView\x86": Exit Function
+    End If
+    '--- 4. <base>\ (direct)
+    If pvFileExists(sBase & "\" & sDll) Then
+        pvLocateRuntimeDll = sBase: Exit Function
+    End If
+End Function
+
+Private Function pvRegReadString(ByVal hRoot As Long, ByVal sSubKey As String, ByVal sValueName As String, ByVal samDesired As Long) As String
+    Dim hKey As Long, lType As Long, lSize As Long, lResult As Long
+    lResult = RegOpenKeyExW(hRoot, StrPtr(sSubKey), 0, samDesired, hKey)
+    If lResult <> 0 Then Exit Function
+    lResult = RegQueryValueExW(hKey, StrPtr(sValueName), 0, lType, 0, lSize)
+    If lResult = 0 And lSize > 0 Then
+        Dim sBuf As String
+        sBuf = Space$(lSize \ 2)
+        lResult = RegQueryValueExW(hKey, StrPtr(sValueName), 0, lType, StrPtr(sBuf), lSize)
+        If lResult = 0 Then
+            If Right$(sBuf, 1) = vbNullChar Then sBuf = Left$(sBuf, Len(sBuf) - 1)
+            pvRegReadString = sBuf
+        End If
+    End If
+    RegCloseKey hKey
 End Function
 
 Private Function pvLocateFile(sFile As String) As String
