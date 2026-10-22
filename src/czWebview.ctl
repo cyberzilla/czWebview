@@ -15,8 +15,9 @@ Attribute VB_Exposed = False
 '=========================================================================
 ' czWebview UserControl v1.2.0
 ' Zero-dependency WebView2 wrapper for VB6 — full-featured, matching
-' wqweto's cWebView2 API surface. Requires czWebview.tlb (type library
-' reference) and WebView2Loader.dll at runtime.
+' wqweto's cWebView2 API surface. Requires only czWebview.tlb (type
+' library reference). WebView2Loader.dll is optional; the runtime
+' is loaded directly via registry discovery when the DLL is absent.
 '
 ' Version: 1.2.0
 ' License: MIT
