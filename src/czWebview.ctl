@@ -189,6 +189,7 @@ Private Declare Function RegCloseKey Lib "advapi32" (ByVal hKey As Long) As Long
 Private Declare Function FreeLibrary Lib "kernel32" (ByVal hLibModule As Long) As Long
 Private m_hRuntimeDll As Long       '--- handle to EmbeddedBrowserWebView.dll
 Private m_pfnCreate   As Long       '--- proc address for CreateWebViewEnvironmentWithOptionsInternal
+Private m_sRuntimeFolder As String   '--- browser executable folder (for direct loading)
 Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
 Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
@@ -1205,6 +1206,7 @@ Public Sub Shutdown()
     '--- Free runtime DLL if loaded directly
     If m_hRuntimeDll <> 0 Then FreeLibrary m_hRuntimeDll: m_hRuntimeDll = 0
     m_pfnCreate = 0
+    m_sRuntimeFolder = vbNullString
     If Not m_oController Is Nothing Then
         m_oController.Close
         Set m_oController = Nothing
@@ -1313,7 +1315,14 @@ Private Function pvCreateWebView2Environment( _
     If LenB(sUserDataFolder) = 0 Then
         sUserDataFolder = Environ$("LOCALAPPDATA") & "\" & UCase$(App.EXEName)
     End If
-    pvCreateWebView2Environment = pvCallFuncPtr(m_pfnCreate, StrPtr(sBrowserExecutableFolder), StrPtr(sUserDataFolder), ObjPtr(oOptions), ObjPtr(oHandler))
+    '--- Use saved runtime folder if caller did not specify one
+    Dim sBrowserFolder As String
+    If LenB(sBrowserExecutableFolder) <> 0 Then
+        sBrowserFolder = sBrowserExecutableFolder
+    Else
+        sBrowserFolder = m_sRuntimeFolder
+    End If
+    pvCreateWebView2Environment = pvCallFuncPtr(m_pfnCreate, StrPtr(sBrowserFolder), StrPtr(sUserDataFolder), ObjPtr(oOptions), ObjPtr(oHandler))
     Exit Function
 EH:
     pvCreateWebView2Environment = Err.Number
@@ -1425,6 +1434,14 @@ Private Function pvEnsureLoader() As Boolean
     Dim sRuntimePath As String
     sRuntimePath = pvFindWebView2Runtime()
     If LenB(sRuntimePath) = 0 Then Exit Function
+    '--- Compute browser executable folder (parent of EBWebView\x86)
+    m_sRuntimeFolder = sRuntimePath
+    If Right$(m_sRuntimeFolder, 4) = "\x86" Or Right$(m_sRuntimeFolder, 4) = "\x64" Then
+        m_sRuntimeFolder = Left$(m_sRuntimeFolder, InStrRev(m_sRuntimeFolder, "\") - 1)
+    End If
+    If Right$(m_sRuntimeFolder, 10) = "\EBWebView" Then
+        m_sRuntimeFolder = Left$(m_sRuntimeFolder, InStrRev(m_sRuntimeFolder, "\") - 1)
+    End If
     Dim sDll As String
     sDll = sRuntimePath & "\EmbeddedBrowserWebView.dll"
     If Not pvFileExists(sDll) Then Exit Function
