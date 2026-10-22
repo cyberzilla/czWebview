@@ -182,15 +182,17 @@ Private Declare Function SysReAllocString Lib "oleaut32" (ByVal pBSTR As Long, B
 Private Declare Sub CoTaskMemFree Lib "ole32" (ByVal pv As Long)
 '--- WebView2 runtime direct loading (no WebView2Loader.dll dependency)
 Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
-Private Declare Function pvCallFuncPtr Lib "user32" Alias "CallWindowProcW" (ByVal pfn As Long, ByVal p1 As Long, ByVal p2 As Long, ByVal p3 As Long, ByVal p4 As Long) As Long
+Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal cc As Long, ByVal vtReturn As Integer, ByVal cActuals As Long, prgvt As Integer, prgpvarg As Long, pvargResult As Variant) As Long
 Private Declare Function RegOpenKeyExW Lib "advapi32" (ByVal hKey As Long, ByVal lpSubKey As Long, ByVal ulOptions As Long, ByVal samDesired As Long, phkResult As Long) As Long
 Private Declare Function RegQueryValueExW Lib "advapi32" (ByVal hKey As Long, ByVal lpValueName As Long, ByVal lpReserved As Long, lpType As Long, ByVal lpData As Long, lpcbData As Long) As Long
 Private Declare Function RegCloseKey Lib "advapi32" (ByVal hKey As Long) As Long
 Private Declare Function FreeLibrary Lib "kernel32" (ByVal hLibModule As Long) As Long
 Private Declare Function SetDllDirectoryW Lib "kernel32" (ByVal lpPathName As Long) As Long
+Private Declare Function LoadLibraryExW Lib "kernel32" (ByVal lpLibFileName As Long, ByVal hFile As Long, ByVal dwFlags As Long) As Long
 Private m_hRuntimeDll As Long       '--- handle to EmbeddedBrowserWebView.dll
-Private m_pfnCreate   As Long       '--- proc address for CreateWebViewEnvironmentWithOptionsInternal
-Private m_sRuntimeFolder As String   '--- browser executable folder (for direct loading)
+Private m_pfnCreate   As Long       '--- proc address for create function
+Private m_bDirectLoad As Boolean    '--- True = direct runtime (5-param internal), False = loader (4-param)
+Private m_sRuntimeVersion As String  '--- detected runtime version string
 Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
 Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
@@ -1207,7 +1209,8 @@ Public Sub Shutdown()
     '--- Free runtime DLL if loaded directly
     If m_hRuntimeDll <> 0 Then FreeLibrary m_hRuntimeDll: m_hRuntimeDll = 0
     m_pfnCreate = 0
-    m_sRuntimeFolder = vbNullString
+    m_bDirectLoad = False
+    m_sRuntimeVersion = vbNullString
     If Not m_oController Is Nothing Then
         m_oController.Close
         Set m_oController = Nothing
@@ -1313,17 +1316,70 @@ Private Function pvCreateWebView2Environment( _
         pvCreateWebView2Environment = E_MOD_NOT_FOUND
         Exit Function
     End If
+    '--- Set runtime version on options for direct loading
+    If m_bDirectLoad And LenB(m_sRuntimeVersion) <> 0 Then
+        Dim oCB As czWebviewCallback
+        Set oCB = oOptions
+        oCB.TargetBrowserVersion = m_sRuntimeVersion
+        Set oCB = Nothing
+    End If
     If LenB(sUserDataFolder) = 0 Then
         sUserDataFolder = Environ$("LOCALAPPDATA") & "\" & UCase$(App.EXEName)
     End If
-    '--- Use saved runtime folder if caller did not specify one
-    Dim sBrowserFolder As String
-    If LenB(sBrowserExecutableFolder) <> 0 Then
-        sBrowserFolder = sBrowserExecutableFolder
+    If m_bDirectLoad Then
+        '--- Direct load: CreateWebViewEnvironmentWithOptionsInternal
+        '--- Signature: (bool checkRunningInstance, int runtimeType,
+        '---             PCWSTR userDataFolder, IUnknown* options,
+        '---             ICoreWebView2...CompletedHandler* handler)
+        '--- 5 params via DispCallFunc (CC_STDCALL=4)
+        Dim vParams(0 To 4) As Variant
+        Dim vTypes(0 To 4) As Integer
+        Dim vPtrs(0 To 4) As Long
+        Dim vResult As Variant
+        Dim k As Long
+        vParams(0) = 1&                   '--- checkRunningInstance = True
+        vParams(1) = 0&                   '--- runtimeType = 0 (evergreen)
+        vParams(2) = StrPtr(sUserDataFolder)
+        vParams(3) = ObjPtr(oOptions)
+        vParams(4) = ObjPtr(oHandler)
+        For k = 0 To 4
+            vTypes(k) = vbLong
+            vPtrs(k) = VarPtr(vParams(k))
+        Next k
+        Dim hr As Long
+        hr = DispCallFunc(0&, m_pfnCreate, 4, vbLong, 5, vTypes(0), vPtrs(0), vResult)
+        If hr < 0 Then
+            pvCreateWebView2Environment = hr
+        Else
+            pvCreateWebView2Environment = CLng(vResult)
+        End If
     Else
-        sBrowserFolder = m_sRuntimeFolder
+        '--- WebView2Loader: CreateCoreWebView2EnvironmentWithOptions
+        '--- Signature: (PCWSTR browserFolder, PCWSTR userDataFolder,
+        '---             IUnknown* options, handler*) - 4 params
+        Dim vP(0 To 3) As Variant
+        Dim vT(0 To 3) As Integer
+        Dim vR(0 To 3) As Long
+        Dim vRes As Variant
+        Dim sBF As String
+        sBF = sBrowserExecutableFolder
+        vP(0) = StrPtr(sBF)
+        vP(1) = StrPtr(sUserDataFolder)
+        vP(2) = ObjPtr(oOptions)
+        vP(3) = ObjPtr(oHandler)
+        Dim j As Long
+        For j = 0 To 3
+            vT(j) = vbLong
+            vR(j) = VarPtr(vP(j))
+        Next j
+        Dim hr2 As Long
+        hr2 = DispCallFunc(0&, m_pfnCreate, 4, vbLong, 4, vT(0), vR(0), vRes)
+        If hr2 < 0 Then
+            pvCreateWebView2Environment = hr2
+        Else
+            pvCreateWebView2Environment = CLng(vRes)
+        End If
     End If
-    pvCreateWebView2Environment = pvCallFuncPtr(m_pfnCreate, StrPtr(sBrowserFolder), StrPtr(sUserDataFolder), ObjPtr(oOptions), ObjPtr(oHandler))
     Exit Function
 EH:
     pvCreateWebView2Environment = Err.Number
@@ -1428,6 +1484,7 @@ Private Function pvEnsureLoader() As Boolean
     End If
     '--- Try WebView2Loader.dll first (backward compatible)
     If pvTryWebView2Loader() Then
+        m_bDirectLoad = False
         pvEnsureLoader = True
         Exit Function
     End If
@@ -1435,20 +1492,21 @@ Private Function pvEnsureLoader() As Boolean
     Dim sRuntimePath As String
     sRuntimePath = pvFindWebView2Runtime()
     If LenB(sRuntimePath) = 0 Then Exit Function
-    '--- Compute browser executable folder (parent of EBWebView\x86)
-    m_sRuntimeFolder = sRuntimePath
-    If Right$(m_sRuntimeFolder, 4) = "\x86" Or Right$(m_sRuntimeFolder, 4) = "\x64" Then
-        m_sRuntimeFolder = Left$(m_sRuntimeFolder, InStrRev(m_sRuntimeFolder, "\") - 1)
-    End If
-    If Right$(m_sRuntimeFolder, 10) = "\EBWebView" Then
-        m_sRuntimeFolder = Left$(m_sRuntimeFolder, InStrRev(m_sRuntimeFolder, "\") - 1)
-    End If
     Dim sDll As String
     sDll = sRuntimePath & "\EmbeddedBrowserWebView.dll"
     If Not pvFileExists(sDll) Then Exit Function
-    '--- Set DLL search path so dependencies resolve from runtime folder
-    SetDllDirectoryW StrPtr(sRuntimePath)
-    m_hRuntimeDll = LoadLibrary(StrPtr(sDll))
+    '--- Compute the version folder (parent of EBWebView\x86) for DLL search path
+    Dim sVersionFolder As String
+    sVersionFolder = sRuntimePath
+    If Right$(sVersionFolder, 4) = "\x86" Or Right$(sVersionFolder, 4) = "\x64" Then
+        sVersionFolder = Left$(sVersionFolder, InStrRev(sVersionFolder, "\") - 1)
+    End If
+    If Right$(sVersionFolder, 10) = "\EBWebView" Then
+        sVersionFolder = Left$(sVersionFolder, InStrRev(sVersionFolder, "\") - 1)
+    End If
+    '--- Set DLL search path to version folder so all dependencies resolve
+    SetDllDirectoryW StrPtr(sVersionFolder)
+    m_hRuntimeDll = LoadLibraryExW(StrPtr(sDll), 0, &H8)   '--- LOAD_WITH_ALTERED_SEARCH_PATH
     SetDllDirectoryW 0  '--- reset to default
     If m_hRuntimeDll = 0 Then Exit Function
     m_pfnCreate = GetProcAddress(m_hRuntimeDll, "CreateWebViewEnvironmentWithOptionsInternal")
@@ -1457,6 +1515,7 @@ Private Function pvEnsureLoader() As Boolean
         m_hRuntimeDll = 0
         Exit Function
     End If
+    m_bDirectLoad = True
     pvEnsureLoader = True
 End Function
 
@@ -1509,6 +1568,8 @@ Private Function pvFindWebView2Runtime() As String
             If LenB(sPath) <> 0 Then
                 sDll = pvLocateRuntimeDll(sPath, sVer)
                 If LenB(sDll) <> 0 Then
+                    '--- Store version for TargetCompatibleBrowserVersion
+                    If LenB(sVer) <> 0 Then m_sRuntimeVersion = sVer
                     pvFindWebView2Runtime = sDll
                     Exit Function
                 End If

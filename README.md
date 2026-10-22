@@ -1,6 +1,6 @@
 # czWebview
 
-**Full-featured VB6 WebView2 UserControl** — Embed modern web content (HTML5, CSS3, ES6+) directly in VB6 applications using Microsoft Edge WebView2 Runtime. Zero external dependencies, no OCX registration required.
+**Full-featured VB6 WebView2 UserControl** — Embed modern web content (HTML5, CSS3, ES6+) directly in VB6 applications using Microsoft Edge WebView2 Runtime. **Zero DLL dependencies** — no WebView2Loader.dll, no OCX registration required.
 
 ---
 
@@ -12,6 +12,7 @@
 - 🔗 JavaScript Bridge — bidirectional messaging (`PostWebMessage` / `chrome.webview.postMessage`)
 - 🧩 Host Objects — expose VB6 COM objects to JavaScript
 - 📦 Single-project embed — just add `.ctl` + `.cls` + `.tlb` to your project
+- 🚫 **No WebView2Loader.dll required** — loads WebView2 Runtime directly via registry discovery (v1.2.0+)
 
 ### Advanced
 - 🖨️ Print UI & PrintToPdf — print pages or save as PDF
@@ -48,7 +49,7 @@
 |---|---|---|
 | VB6 IDE | ✅ | SP6 recommended |
 | WebView2 Runtime | ✅ | Pre-installed on Windows 10 (1803+) and Windows 11 |
-| WebView2Loader.dll | ✅ | Included in `External\` folder (~115KB, x86) |
+| WebView2Loader.dll | ❌ | **Optional** since v1.2.0 — czWebview loads the runtime directly. If present, it will be used as fallback. |
 | czWebview.tlb | ✅ | Pre-compiled included, or build with `typelib\compile_tlb.bat` |
 | Windows SDK (MIDL) | ❌ | Only needed to recompile the TLB |
 
@@ -62,7 +63,7 @@
 1. Project → Add User Control → Existing → select src\czWebview.ctl
 2. Project → Add Class Module → Existing → select src\czWebviewCallback.cls
 3. Project → References → Browse → select typelib\czWebview.tlb
-4. Place WebView2Loader.dll next to your .exe (or in app folder)
+4. (Optional) Place WebView2Loader.dll next to your .exe — not needed since v1.2.0
 ```
 
 ### 2. Place the control on your Form
@@ -138,13 +139,15 @@ chrome.webview.addEventListener('message', function(e) {
 czWebview/
 ├── src/
 │   ├── czWebview.ctl               # ★ Main UserControl — public API
-│   └── czWebviewCallback.cls       # Internal callback handler (44 interfaces)
+│   ├── czWebviewCallback.cls       # Internal callback handler (44 interfaces)
+│   ├── Bump0/                      # v1.1.0 backup (with WebView2Loader.dll dependency)
+│   └── Bump1/                      # v1.2.0 (direct runtime loading)
 ├── typelib/
 │   ├── czWebview.odl               # Interface definitions (ODL source)
 │   ├── czWebview.tlb               # Compiled type library
 │   └── compile_tlb.bat             # Auto-compile script (uses MIDL)
 ├── External/
-│   └── WebView2Loader.dll          # Microsoft x86 loader
+│   └── WebView2Loader.dll          # Microsoft x86 loader (optional since v1.2.0)
 ├── demo/
 │   ├── SimpleTest/                 # Simple browser demo
 │   │   ├── TestProject.vbp
@@ -191,6 +194,9 @@ This requires the Windows SDK (MIDL compiler). The script auto-detects the SDK p
 | `StatusBarText` | String | Get | Current status bar text |
 | `IsSuspended` | Boolean | Get | WebView is suspended |
 | `IsMuted` | Boolean | Get/Let | Mute/unmute audio |
+| `LoaderPath` | String | Get/Let | Custom path for WebView2Loader.dll (checked first before default search) |
+| `DefaultBackgroundColor` | OLE_COLOR | Get/Let | Background color (set before `Init` to avoid white flash) |
+| `Version` | String | Get | Control version string (e.g. "1.2.0") |
 
 #### Settings Properties
 
@@ -438,6 +444,26 @@ Dim sResult As String
 sResult = czWebview1.CallDevToolsProtocolMethod("Emulation.setDeviceMetricsOverride", _
     "{""width"":375,""height"":812,""deviceScaleFactor"":3,""mobile"":true}")
 ```
+
+---
+
+## 🔌 Direct Runtime Loading (v1.2.0+)
+
+Since v1.2.0, czWebview can load the WebView2 Runtime **directly** without `WebView2Loader.dll`. This means your deployed application only needs:
+
+- Your `.exe`
+- `czWebview.tlb`
+- WebView2 Runtime (pre-installed on Windows 10/11)
+
+**How it works:**
+
+1. First tries to load `WebView2Loader.dll` (backward compatible)
+2. If not found, discovers the runtime via Windows Registry:
+   - `HKLM\SOFTWARE\Microsoft\EdgeUpdate\Clients\{GUID}` → `location` + `pv` (version)
+3. Loads `EmbeddedBrowserWebView.dll` directly using `LoadLibraryExW`
+4. Calls `CreateWebViewEnvironmentWithOptionsInternal` via `DispCallFunc`
+
+**Auto-update safe:** The registry always points to the current installed version, so runtime updates are handled automatically.
 
 ---
 

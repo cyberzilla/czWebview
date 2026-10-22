@@ -78,7 +78,6 @@ Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination
 Private Declare Function CoTaskMemAlloc Lib "ole32" (ByVal cb As Long) As Long
 Private Declare Sub CoTaskMemFree Lib "ole32" (ByVal pv As Long)
 Private Declare Function SysReAllocString Lib "oleaut32" (ByVal pBSTR As Long, ByVal lpsz As Long) As Long
-Private Declare Function GetAvailableCoreWebView2BrowserVersionString Lib "WebView2Loader" (ByVal browserExecutableFolder As Long, ByRef versionInfo As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 
 '=========================================================================
@@ -117,6 +116,10 @@ End Property
 
 Public Property Let AreBrowserExtensionsEnabled(ByVal bValue As Boolean)
     m_bAreBrowserExtensionsEnabled = bValue
+End Property
+
+Public Property Let TargetBrowserVersion(sValue As String)
+    m_sTargetCompatibleBrowserVersion = sValue
 End Property
 
 Private Property Get pvOwner() As czWebview
@@ -177,13 +180,8 @@ Private Property Let IVBWebView2EnvironmentOptions_Language(ByVal RHS As Long)
 End Property
 
 Private Property Get IVBWebView2EnvironmentOptions_TargetCompatibleBrowserVersion() As Long
-    Dim lVersionPtr As Long
-    If LenB(m_sTargetCompatibleBrowserVersion) = 0 Then
-        Call GetAvailableCoreWebView2BrowserVersionString(0, lVersionPtr)
-        IVBWebView2EnvironmentOptions_TargetCompatibleBrowserVersion = lVersionPtr
-    Else
-        IVBWebView2EnvironmentOptions_TargetCompatibleBrowserVersion = pvFromString(m_sTargetCompatibleBrowserVersion)
-    End If
+    '--- Return stored version (set by czWebview via TargetBrowserVersion property)
+    IVBWebView2EnvironmentOptions_TargetCompatibleBrowserVersion = pvFromString(m_sTargetCompatibleBrowserVersion)
 End Property
 
 Private Property Let IVBWebView2EnvironmentOptions_TargetCompatibleBrowserVersion(ByVal RHS As Long)
