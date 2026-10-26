@@ -658,6 +658,23 @@ Public Property Let DefaultBackgroundColor(ByVal clr As OLE_COLOR)
     End If
 End Property
 
+'--- Set transparent background (Alpha=0) for acrylic/vibrancy effects.
+'    WebView2 COREWEBVIEW2_COLOR {A=0,R=0,G=0,B=0} = fully transparent.
+Public Property Let TransparentBackground(ByVal bValue As Boolean)
+    If bValue Then
+        m_lDefaultBgColor = 0   '--- {Alpha=0, R=0, G=0, B=0}
+    Else
+        m_lDefaultBgColor = -1  '--- sentinel: not set
+    End If
+    If Not m_oController2 Is Nothing Then
+        m_oController2.DefaultBackgroundColor = m_lDefaultBgColor
+    End If
+End Property
+
+Public Property Get TransparentBackground() As Boolean
+    TransparentBackground = (m_lDefaultBgColor = 0)
+End Property
+
 '=========================================================================
 ' Public methods
 '=========================================================================
