@@ -13,13 +13,13 @@ Attribute VB_Creatable = True
 Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
-' czWebview UserControl v1.2.0
+' czWebview UserControl v1.3.0
 ' Zero-dependency WebView2 wrapper for VB6 — full-featured, matching
 ' wqweto's cWebView2 API surface. Requires only czWebview.tlb (type
 ' library reference). WebView2Loader.dll is optional; the runtime
 ' is loaded directly via registry discovery when the DLL is absent.
 '
-' Version: 1.2.0
+' Version: 1.3.0
 ' License: MIT
 ' Author:  Abu Dzakiyyah
 ' URL:     https://github.com/cyberzilla/czWebview
@@ -147,7 +147,7 @@ Public Event NavigationStarting(ByVal IsUserInitiated As Boolean, ByVal IsRedire
 Public Event NavigationCompleted(ByVal IsSuccess As Boolean, ByVal WebErrorStatus As Long)
 Public Event DocumentComplete()
 Public Event SourceChanged()
-Public Event ProcessFailed()
+Public Event ProcessFailed(ByVal FailedKind As Long)
 Public Event TitleChanged(ByVal Title As String)
 Public Event ContentLoading(ByVal IsErrorPage As Boolean)
 Public Event HistoryChanged()
@@ -171,6 +171,9 @@ Public Event ContainsFullScreenElementChanged(ByVal IsFullScreen As Boolean)
 Public Event DOMContentLoaded()
 Public Event BasicAuthenticationRequested(ByVal URI As String, ByVal Challenge As String, UserName As String, Password As String, Cancel As Boolean)
 Public Event FrameCreated(ByVal FrameName As String)
+Public Event IsMutedChanged(ByVal IsMuted As Boolean)
+Public Event IsDocumentPlayingAudioChanged(ByVal IsPlayingAudio As Boolean)
+Public Event FaviconChanged(ByVal FaviconUri As String)
 
 '=========================================================================
 ' API declarations
@@ -293,7 +296,7 @@ Private m_lDefaultBgColor           As Long                 '--- COREWEBVIEW2_CO
 '=========================================================================
 
 Public Property Get Version() As String
-    Version = "1.2.0"
+    Version = "1.3.0"
 End Property
 
 Public Property Get IsInitialized() As Boolean
@@ -584,6 +587,19 @@ Public Property Let IsMuted(ByVal bValue As Boolean)
     End If
 End Property
 
+Public Property Get IsDocumentPlayingAudio() As Boolean
+    If Not m_oWebView11 Is Nothing Then
+        IsDocumentPlayingAudio = m_oWebView11.IsDocumentPlayingAudio
+    End If
+End Property
+
+Public Property Get FaviconUri() As String
+    On Error Resume Next
+    If Not m_oWebView16 Is Nothing Then
+        FaviconUri = pvToString(m_oWebView16.FaviconUri)
+    End If
+End Property
+
 Public Property Get StatusBarText() As String
     If Not m_oWebView13 Is Nothing Then
         StatusBarText = pvToString(m_oWebView13.StatusBarText)
@@ -652,7 +668,12 @@ Public Property Get DefaultBackgroundColor() As OLE_COLOR
 End Property
 
 Public Property Let DefaultBackgroundColor(ByVal clr As OLE_COLOR)
-    m_lDefaultBgColor = pvOleColorToWV2(clr)
+    If clr = 0 Then
+        '--- Special: 0 means transparent (Alpha=0, R=0, G=0, B=0)
+        m_lDefaultBgColor = 0
+    Else
+        m_lDefaultBgColor = pvOleColorToWV2(clr)
+    End If
     If Not m_oController2 Is Nothing Then
         m_oController2.DefaultBackgroundColor = m_lDefaultBgColor
     End If
@@ -1342,14 +1363,16 @@ Private Function pvCreateWebView2Environment( _
         Set oCB = Nothing
     End If
     If LenB(sUserDataFolder) = 0 Then
-        sUserDataFolder = Environ$("LOCALAPPDATA") & "\" & UCase$(App.EXEName)
+        sUserDataFolder = Environ$("LOCALAPPDATA") & "\" & UCase$(App.EXEName) & "_x86"
     End If
     If m_bDirectLoad Then
         '--- Direct load: CreateWebViewEnvironmentWithOptionsInternal
         '--- Signature: (bool checkRunningInstance, int runtimeType,
         '---             PCWSTR userDataFolder, IUnknown* options,
         '---             ICoreWebView2...CompletedHandler* handler)
-        '--- 5 params via DispCallFunc (CC_STDCALL=4)
+        '--- 5 params via DispCallFunc (CC_CDECL=1)
+        '--- NOTE: This function uses __cdecl calling convention, NOT __stdcall!
+        '--- Using CC_STDCALL(4) here causes stack corruption on x86.
         Dim vParams(0 To 4) As Variant
         Dim vTypes(0 To 4) As Integer
         Dim vPtrs(0 To 4) As Long
@@ -1365,7 +1388,7 @@ Private Function pvCreateWebView2Environment( _
             vPtrs(k) = VarPtr(vParams(k))
         Next k
         Dim hr As Long
-        hr = DispCallFunc(0&, m_pfnCreate, 4, vbLong, 5, vTypes(0), vPtrs(0), vResult)
+        hr = DispCallFunc(0&, m_pfnCreate, 1, vbLong, 5, vTypes(0), vPtrs(0), vResult)
         If hr < 0 Then
             pvCreateWebView2Environment = hr
         Else
@@ -1819,9 +1842,14 @@ Friend Sub OnControllerCreated(ByVal hResult As Long, ByVal oCtrl As IVBCoreWebV
     If Not m_oWebView11 Is Nothing Then
         m_oWebView11.add_ContextMenuRequested m_oEventSink
         m_oWebView11.add_BasicAuthenticationRequested m_oEventSink
+        m_oWebView11.add_IsMutedChanged m_oEventSink
+        m_oWebView11.add_IsDocumentPlayingAudioChanged m_oEventSink
     End If
     If Not m_oWebView13 Is Nothing Then
         m_oWebView13.add_StatusBarTextChanged m_oEventSink
+    End If
+    If Not m_oWebView16 Is Nothing Then
+        m_oWebView16.add_FaviconChanged m_oEventSink
     End If
     If Not m_oWebView4 Is Nothing Then
         m_oWebView4.add_WebResourceResponseReceived m_oEventSink
@@ -1956,8 +1984,8 @@ Friend Sub SinkSourceChanged()
     RaiseEvent SourceChanged
 End Sub
 
-Friend Sub SinkProcessFailed()
-    RaiseEvent ProcessFailed
+Friend Sub SinkProcessFailed(ByVal lFailedKind As Long)
+    RaiseEvent ProcessFailed(lFailedKind)
 End Sub
 
 Friend Sub SinkFocusChanged(ByVal bGotFocus As Boolean)
@@ -2148,4 +2176,34 @@ Friend Sub SinkBasicAuthenticationRequested(ByVal oArgs As IVBCoreWebView2BasicA
     Exit Sub
 EH:
     Debug.Print "czWebview.SinkBasicAuthenticationRequested error: " & Err.Description
+End Sub
+
+Friend Sub SinkIsMutedChanged()
+    On Error GoTo EH
+    If Not m_oWebView11 Is Nothing Then
+        RaiseEvent IsMutedChanged(CBool(m_oWebView11.IsMuted))
+    End If
+    Exit Sub
+EH:
+    Debug.Print "czWebview.SinkIsMutedChanged error: " & Err.Description
+End Sub
+
+Friend Sub SinkIsDocumentPlayingAudioChanged()
+    On Error GoTo EH
+    If Not m_oWebView11 Is Nothing Then
+        RaiseEvent IsDocumentPlayingAudioChanged(CBool(m_oWebView11.IsDocumentPlayingAudio))
+    End If
+    Exit Sub
+EH:
+    Debug.Print "czWebview.SinkIsDocumentPlayingAudioChanged error: " & Err.Description
+End Sub
+
+Friend Sub SinkFaviconChanged()
+    On Error GoTo EH
+    If Not m_oWebView16 Is Nothing Then
+        RaiseEvent FaviconChanged(pvToString(m_oWebView16.FaviconUri))
+    End If
+    Exit Sub
+EH:
+    Debug.Print "czWebview.SinkFaviconChanged error: " & Err.Description
 End Sub

@@ -93,6 +93,9 @@ library czWebviewLib
     interface IVBWebView2PrintToPdfStreamCompletedHandler;
     interface IVBWebView2ProfileAddBrowserExtensionCompletedHandler;
     interface IVBWebView2ProfileGetBrowserExtensionsCompletedHandler;
+    interface IVBWebView2IsMutedChangedEventHandler;
+    interface IVBWebView2IsDocumentPlayingAudioChangedEventHandler;
+    interface IVBWebView2FaviconChangedEventHandler;
     interface IVBCoreWebView2Settings;
     interface IVBCoreWebView2Settings6;
     interface IVBCoreWebView2NavigationStartingEventArgs;
@@ -426,6 +429,24 @@ library czWebviewLib
     interface IVBWebView2BasicAuthenticationRequestedEventHandler : IUnknown
     {
         HRESULT Invoke([in] VB6IUnknown* sender, [in] IVBCoreWebView2BasicAuthenticationRequestedEventArgs* args);
+    };
+
+    [uuid(57D90347-CD0E-4952-A4A2-7483A2756F08), odl, version(1.0)]
+    interface IVBWebView2IsMutedChangedEventHandler : IUnknown
+    {
+        HRESULT Invoke([in] VB6IUnknown* sender, [in] VB6IUnknown* args);
+    };
+
+    [uuid(5DEF109A-2F4B-49FA-B7F6-11C39E513328), odl, version(1.0)]
+    interface IVBWebView2IsDocumentPlayingAudioChangedEventHandler : IUnknown
+    {
+        HRESULT Invoke([in] VB6IUnknown* sender, [in] VB6IUnknown* args);
+    };
+
+    [uuid(2913DA94-833D-4DE0-8DCA-900FC524A1A4), odl, version(1.0)]
+    interface IVBWebView2FaviconChangedEventHandler : IUnknown
+    {
+        HRESULT Invoke([in] VB6IUnknown* sender, [in] VB6IUnknown* args);
     };
 
     // ================================================================
@@ -915,11 +936,11 @@ library czWebviewLib
         HRESULT remove_ClientCertificateRequested([in] long token);
         HRESULT OpenTaskManagerWindow();
         HRESULT PrintToPdf([in] long resultFilePath, [in] IVBCoreWebView2PrintSettings* printSettings, [in] IVBWebView2PrintToPdfCompletedHandler* handler);
-        HRESULT add_IsMutedChanged([in] VB6IUnknown* eventHandler, [out, retval] long* token);
+        HRESULT add_IsMutedChanged([in] IVBWebView2IsMutedChangedEventHandler* eventHandler, [out, retval] long* token);
         HRESULT remove_IsMutedChanged([in] long token);
         [propget] HRESULT IsMuted([out, retval] long* value);
         [propput] HRESULT IsMuted([in] long value);
-        HRESULT add_IsDocumentPlayingAudioChanged([in] VB6IUnknown* eventHandler, [out, retval] long* token);
+        HRESULT add_IsDocumentPlayingAudioChanged([in] IVBWebView2IsDocumentPlayingAudioChangedEventHandler* eventHandler, [out, retval] long* token);
         HRESULT remove_IsDocumentPlayingAudioChanged([in] long token);
         [propget] HRESULT IsDocumentPlayingAudio([out, retval] long* value);
         HRESULT add_IsDefaultDownloadDialogOpenChanged([in] VB6IUnknown* eventHandler, [out, retval] long* token);
@@ -955,7 +976,7 @@ library czWebviewLib
         HRESULT add_ServerCertificateErrorDetected([in] VB6IUnknown* eventHandler, [out, retval] long* token);
         HRESULT remove_ServerCertificateErrorDetected([in] long token);
         HRESULT ClearServerCertificateErrorActions([in] VB6IUnknown* handler);
-        HRESULT add_FaviconChanged([in] VB6IUnknown* eventHandler, [out, retval] long* token);
+        HRESULT add_FaviconChanged([in] IVBWebView2FaviconChangedEventHandler* eventHandler, [out, retval] long* token);
         HRESULT remove_FaviconChanged([in] long token);
         [propget] HRESULT FaviconUri([out, retval] long* value);
         HRESULT GetFavicon([in] long format, [in] VB6IUnknown* handler);
@@ -996,7 +1017,7 @@ library czWebviewLib
     };
 
     // ================================================================
-    // Controller2 — extends Controller with DefaultBackgroundColor
+    // Controller2 ï¿½ extends Controller with DefaultBackgroundColor
     // ================================================================
     [uuid(C979903E-D4CA-4228-92EB-47EE3FA96EAB), odl, version(1.0)]
     interface IVBCoreWebView2Controller2 : IVBCoreWebView2Controller

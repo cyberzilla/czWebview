@@ -12,7 +12,7 @@ Attribute VB_Creatable = True
 Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
-' CLASS: czWebviewCallback v1.2.0
+' CLASS: czWebviewCallback v1.3.0
 ' Internal companion class for czWebview UserControl.
 ' Full-featured callback handler matching wqweto's cWebView2Callback.
 ' Handles:
@@ -70,6 +70,9 @@ Implements IVBWebView2WindowCloseRequestedEventHandler
 Implements IVBWebView2ZoomFactorChangedEventHandler
 Implements IVBWebView2MoveFocusRequestedEventHandler
 Implements IVBWebView2ContextMenuRequestedEventHandler
+Implements IVBWebView2IsMutedChangedEventHandler
+Implements IVBWebView2IsDocumentPlayingAudioChangedEventHandler
+Implements IVBWebView2FaviconChangedEventHandler
 
 '=========================================================================
 ' API
@@ -79,6 +82,7 @@ Private Declare Function CoTaskMemAlloc Lib "ole32" (ByVal cb As Long) As Long
 Private Declare Sub CoTaskMemFree Lib "ole32" (ByVal pv As Long)
 Private Declare Function SysReAllocString Lib "oleaut32" (ByVal pBSTR As Long, ByVal lpsz As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
+Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal cc As Long, ByVal vtReturn As Integer, ByVal cActuals As Long, prgvt As Integer, prgpvarg As Long, pvargResult As Variant) As Long
 
 '=========================================================================
 ' Member variables
@@ -157,6 +161,20 @@ Private Function pvFromString(sValue As String) As Long
         pvFromString = CoTaskMemAlloc(LenB(sValue) + 2)
         Call CopyMemory(ByVal pvFromString, ByVal StrPtr(sValue), LenB(sValue) + 2)
     End If
+End Function
+
+'--- Raw vtable call: get a Long [out,retval] from a COM object at a given vtable slot.
+'    Useful when the args interface is typed as VB6IUnknown in the ODL.
+'    Signature: HRESULT Method([out,retval] long* value)  =>  1 param (ptr to Long)
+Private Function pvVtblGetLong(ByVal pObj As Long, ByVal lSlot As Long) As Long
+    Dim vParams(0) As Variant
+    Dim vTypes(0) As Integer
+    Dim vPtrs(0) As Long
+    Dim vResult As Variant
+    vParams(0) = VarPtr(pvVtblGetLong)
+    vTypes(0) = vbLong
+    vPtrs(0) = VarPtr(vParams(0))
+    DispCallFunc pObj, lSlot * 4, 4, vbLong, 1, vTypes(0), vPtrs(0), vResult
 End Function
 
 '=========================================================================
@@ -307,7 +325,12 @@ End Sub
 
 Private Sub IVBWebView2ProcessFailedEventHandler_Invoke(ByVal sender As VB6IUnknown, ByVal oArgs As VB6IUnknown)
     If m_lOwnerWeakRef = 0 Then Exit Sub
-    pvOwner.SinkProcessFailed
+    '--- Extract ProcessFailedKind from args (slot 3 = get_Kind)
+    Dim lKind As Long
+    On Error Resume Next
+    lKind = pvVtblGetLong(ObjPtr(oArgs), 3)
+    On Error GoTo 0
+    pvOwner.SinkProcessFailed lKind
 End Sub
 
 '=========================================================================
@@ -675,6 +698,33 @@ Private Sub IVBWebView2ContextMenuRequestedEventHandler_Invoke(ByVal sender As V
     oArgs.Handled = -bHandled
 End Sub
 
+
+'=========================================================================
+' IVBWebView2IsMutedChangedEventHandler
+'=========================================================================
+
+Private Sub IVBWebView2IsMutedChangedEventHandler_Invoke(ByVal sender As VB6IUnknown, ByVal args As VB6IUnknown)
+    If m_lOwnerWeakRef = 0 Then Exit Sub
+    pvOwner.SinkIsMutedChanged
+End Sub
+
+'=========================================================================
+' IVBWebView2IsDocumentPlayingAudioChangedEventHandler
+'=========================================================================
+
+Private Sub IVBWebView2IsDocumentPlayingAudioChangedEventHandler_Invoke(ByVal sender As VB6IUnknown, ByVal args As VB6IUnknown)
+    If m_lOwnerWeakRef = 0 Then Exit Sub
+    pvOwner.SinkIsDocumentPlayingAudioChanged
+End Sub
+
+'=========================================================================
+' IVBWebView2FaviconChangedEventHandler
+'=========================================================================
+
+Private Sub IVBWebView2FaviconChangedEventHandler_Invoke(ByVal sender As VB6IUnknown, ByVal args As VB6IUnknown)
+    If m_lOwnerWeakRef = 0 Then Exit Sub
+    pvOwner.SinkFaviconChanged
+End Sub
 '=========================================================================
 ' Class lifecycle
 '=========================================================================
